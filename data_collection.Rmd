@@ -1,0 +1,43 @@
+---
+title: "ADUS data collection"
+author: "Dmitry Pavlyuk"
+date: "5 February 2019"
+output: html_document
+---
+
+
+ADUS data collection
+================
+
+```{r setup, comment=TRUE, message = TRUE, echo=TRUE, warning=TRUE}
+rm(list=ls())           # Clean the environment
+options(scipen=6)       # display digits proberly!! not the scientific version
+options(digits.secs=6)  # use milliseconds in Date/Time data types
+library(knitr)          # set global knitr options of the document
+opts_chunk$set(comment=TRUE, message = TRUE, echo=TRUE, error=TRUE, warning=TRUE)
+```
+
+```{r eval=FALSE}
+print("Don't run me")
+```
+
+GitHub Documents
+----------------
+
+This is an R Markdown format used for publishing markdown documents to GitHub. When you click the **Knit** button all R code chunks are run and a markdown file (.md) suitable for publishing to GitHub is generated.
+
+Including Code
+--------------
+
+You can include R code in the document as follows:
+
+`{r cars} summary(cars)`
+
+Including Plots
+---------------
+
+You can also embed plots, for example:
+
+`{r pressure, echo=FALSE} plot(pressure)`
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
