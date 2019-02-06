@@ -3,9 +3,10 @@ needs(imputeTS)
 needs(anomalize)
 needs(tidyquant)
 needs(tibbletime)
+needs(xml2)
 
-load_config_data <- function(config_file){
-  config <- read_xml(config_file)
+LoadConfigData <- function(config_file){
+  config <- read_xml(gzfile(config_file))
   
   values <-
     lapply(xml_find_all(config, "//corridor"), function(corridor) {
@@ -57,7 +58,7 @@ load_config_data <- function(config_file){
 }
 
 
-load_detector_data <- function(detector_name, folder){
+load_detector_data <- function(detector_name, folder, verbose=F){
   n <- 25*60*2 #maximum - 25 hrs a day
   res <- list()
   if (!is.na(detector_name) & length(detector_name)>0){
@@ -67,17 +68,17 @@ load_detector_data <- function(detector_name, folder){
       res[[paste0(detector_name,"_volume")]] <- 
         readBin(vFile, what="int", size=1, signed=F, n=n)
     }else{
-      warning(paste("No volume file for detector", detector_name))
+      if (verbose) warning(paste("No volume file for detector", detector_name))
     }
     cFile <- paste0(folder,"\\",detector_name,".c30")[1]
     if (file.exists(cFile)){
       res[[paste0(detector_name,"_occupancy")]] <- 
         readBin(cFile, what="int", size=2, signed=F, n=n,endian = "big")
     }else{
-      warning(paste("No occupancy file for detector", detector_name))
+      if (verbose) warning(paste("No occupancy file for detector", detector_name))
     }
   }else{
-    warning("Empty detector name")
+    if (verbose) ("Empty detector name")
   }
   return(res)
 }
@@ -104,13 +105,13 @@ combine_detectors<-function(data,detector_data){
 
 load_node_data <- function(config, data_path, datadate, verbose=F){
   if (verbose) print(paste("Loading raw data",datadate))
-  data_file <- paste0(data_path,datadate,".traffic")
-  data_folder <- paste0(data_path,datadate)
+  data_file <- file.path(data_path,paste0(datadate,".traffic"))
+  data_folder <- file.path(data_path,datadate)
   if (!dir.exists(data_folder)){
     if (verbose) print(paste("Unzipping ",data_file))
     unzip(data_file, exdir=data_folder)
   }
-  raw.data<-sapply(config$detector_name, load_detector_data, folder=data_folder)
+  raw.data<-sapply(config$detector_name, load_detector_data, folder=data_folder, verbose=F)
   raw.data[sapply(raw.data, is_empty)] <- NULL
   if (verbose) print(paste("Raw data loaded. Number of detectors:",length(raw.data)))
   if (verbose) print("Combining data to nodes")
@@ -124,12 +125,12 @@ load_node_data <- function(config, data_path, datadate, verbose=F){
   return(res.tib)
 }
 
-raw_to_csv <- function(config, folder, csv_folder,verbose=F){
+TransformToCSV <- function(config, folder, csv_folder,verbose=F){
   if(!dir.exists(csv_folder)) dir.create(csv_folder)
   files <- list.files(folder, pattern = "\\.traffic$")
   for (file in files){
     datadate<-tools::file_path_sans_ext(file)
-    csv_file <- paste0(csv_folder,datadate, ".csv")
+    csv_file <- file.path(csv_folder,paste0(datadate, ".csv"))
     if (!file.exists(csv_file)){
       res<-load_node_data(config, folder,datadate, verbose = verbose)
       if(verbose) print(paste("Saving",csv_file))
@@ -145,7 +146,7 @@ load_csv_data <- function(csv_path, startdate, days, verbose=F){
   for (day in as.character(seq(as.Date(startdate, format="%Y%m%d"), by = "day", length.out = days))){
     datadate <- gsub('-','',day)
     if (verbose) print(paste("Reading and merging data for ", day))
-    x <- read_csv(paste0(csv_path,datadate,".csv"),col_types = cols(.default = "d", datetime="?"))
+    x <- read_csv(file.path(csv_path,paste0(datadate,".csv")),col_types = cols(.default = "d", datetime="?"))
     res<-bind_rows(res,x)
   }
   return(res)
@@ -169,7 +170,7 @@ ggplot_missing <- function(x){
 }
 
 
-aggregate_data <- function(tib,agg.size){
+AggregateData <- function(tib,agg.size){
   agg.id<-sort(rep(seq(from=1, to=nrow(tib)/agg.size),agg.size))
   tib<-add_column(tib, agg.id=agg.id)
   res <-bind_cols(
@@ -289,7 +290,7 @@ prepare_matrix<-function(paths,nodes, useTime=T){
   return(A)
 }
 
-drop_or_impute <- function(tib, imputeLimit=0.05,verbose=F){
+DropOrImpute <- function(tib, imputeLimit=0.05,verbose=F){
   res<-tib
   distr.na<-sapply(tib, function(x) mean(is.na(x)))
   ns<-names(distr.na[distr.na>0])
@@ -318,7 +319,7 @@ drop_or_impute <- function(tib, imputeLimit=0.05,verbose=F){
 }
 
 
-load_massive_data <-function(csv_path, start_date, number_of_days, block_size=4*7){
+LoadMassiveData <-function(csv_path, start_date, number_of_days, block_size=4*7){
   tib <- tibble()
   rem <- number_of_days
   read_from <- start_date

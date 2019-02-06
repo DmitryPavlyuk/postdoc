@@ -1,0 +1,63 @@
+---
+title: "Data transformation"
+author: "Dmitry Pavlyuk"
+date: "February 6, 2019"
+output: html_document
+---
+
+This document provides a routine for transforming traffic data to usable R tibbles. We suppose that data in ADUS  (.traffic) format are downloaded using [data collection markdown](./data_collection.Rmd). 
+
+```{r child = 'env.Rmd'}
+```
+
+Load necessary libraries
+----------------
+```{r libs}
+memory.limit(size=1024*128)
+library(needs)
+needs(tidyverse)
+
+source(file.path("R","prepare_data_functions.R"))
+```
+
+Transform data
+----------------
+```{r transform_config}
+if (!file.exists(config.rds)){
+  LoadConfigData(config.file.gz) %>% filter(!is.na(detector_name)) %>% saveRDS(config.rds)
+  print("Configuration file is parsed")
+}else{
+  print("Parsed configuration file exists - skipped")
+}
+config.tibble <- readRDS(config.rds)
+```
+
+```{r transform_data_to_csv}
+TransformToCSV(config.tibble, data.folder.downloaded,data.folder.tmp, verbose = T)
+```
+
+
+```{r transform_data_to_rds}
+# Prepare working datasets
+
+if (!file.exists(data.rds)){
+LoadMassiveData(data.folder.tmp, download.start.date, number_of_days=download.days, block_size=1*7)%>%
+  mutate(dow=weekdays(datetime))%>%mutate(dow_time=paste(dow,format(datetime, "%H:%M"))) %>%
+  saveRDS(data.rds)
+  print("RDS data file saved")
+}else{
+  print("RDS data exists - skipped")
+}
+```
+
+```{r aggregate}
+data.raw<-readRDS(data.rds)
+for (ta in c(12,6,4,3,2,1)){
+  print(paste("Preparing data for time aggregation",ta,"mins"))
+  data<-AggregateData(data.raw, ta*2)%>%DropOrImpute(imputeLimit=impute.limit)
+  series<-colnames(data%>%select(-datetime))
+  data%>%gather(series,key='node', value='value')%>%group_by(node)%>%
+  saveRDS(file.path(data.folder.prepared,paste0("working-",ta,"mins.rds")))
+}
+```
+
