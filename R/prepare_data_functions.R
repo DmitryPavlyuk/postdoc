@@ -207,7 +207,7 @@ load_all_links <-function(config){
                                                  distance=d,
                                                  time=d/avspeed)
         if(!is.na(node$node_forks)){
-          f <- config.nodes%>%filter(node_name==node$node_forks)
+          f <- config%>%filter(node_name==node$node_forks)
           if (!is.null(f) & (nrow(f)>0)){
             d<-distHaversine(c(node$node_lon,node$node_lat),c(f$node_lon,f$node_lat))
             res[[as.character(length(res)+1)]]<-list(from=node$node_name,
@@ -271,7 +271,7 @@ find_paths <- function(nodes, all.links, verbose=F){
   return(bind_rows(paths)%>%filter(from %in% nodes & to %in% nodes))
 }
 
-combine_to_nodes <- function(config){
+CombineToNodes <- function(config){
   return(config %>% group_by(node_name) %>% 
            summarise_all(funs(first))%>%select(-starts_with("detector"))%>%
            arrange(corridor_name,node_seq_number)%>%
@@ -358,22 +358,30 @@ filterAnomalies <- function(data, frequency, alpha=0.01){
 }
 
 prepare_shortest_distances<-function(nodes, all.links, useTime=T){
-  g <-  get_graph(nodes, all.links)
+  g <-  GetGraph(nodes, all.links)
   shortestA <- shortest.paths(g, mode="out")
   shortestA [shortestA==0] <- Inf
   return(shortestA)
 }
 
-get_graph<-function(nodes, all.links){
+GetGraph<-function(nodes, all.links){
   res<-find_paths(nodes, all.links)
   A<-prepare_matrix(res,nodes)
   g <-  graph.adjacency(A, mode="directed", weighted=TRUE)
   return(g)
 }
 
-get_network<-function(node, shortestA, radius){
+GetNetwork<-function(node, shortestA, radius){
   node<-c(node)
-  next_nodes<-shA[node,order(shA[node,])]
-  prev_nodes<-shA[order(shA[,node]),node]
+  next_nodes<-shortestA[node,order(shortestA[node,])]
+  prev_nodes<-shortestA[order(shortestA[,node]),node]
+  
   return(c(prev_nodes[prev_nodes<radius],next_nodes[next_nodes<radius]))
+}
+
+CalculateShortestDistances <-function(config.nodes){
+  all.links<-load_all_links(config.nodes)
+  allnodes<-as.vector(config.nodes%>%distinct(node_name)%>%pull)
+  shA<-prepare_shortest_distances(allnodes,all.links,useTime=T)
+  return(shA)
 }

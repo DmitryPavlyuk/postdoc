@@ -24,7 +24,7 @@ Transform data
 ----------------
 ```{r transform_config}
 if (!file.exists(config.rds)){
-  LoadConfigData(config.file.gz) %>% filter(!is.na(detector_name)) %>% saveRDS(config.rds)
+  LoadConfigData(config.file.gz) %>% saveRDS(config.rds)
   print("Configuration file is parsed")
 }else{
   print("Parsed configuration file exists - skipped")
@@ -33,7 +33,8 @@ config.tibble <- readRDS(config.rds)
 ```
 
 ```{r transform_data_to_csv}
-TransformToCSV(config.tibble, data.folder.downloaded,data.folder.tmp, verbose = T)
+TransformToCSV(config.tibble %>% filter(!is.na(detector_name)), 
+               data.folder.downloaded,data.folder.tmp, verbose = T)
 ```
 
 

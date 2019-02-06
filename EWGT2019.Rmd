@@ -1,0 +1,70 @@
+---
+title: "EWGT2019"
+author: "Dmitry Pavlyuk"
+date: "February 6, 2019"
+output: html_document
+---
+
+This markdown document reproduces the research "Ensemble learning of the spatiotemporal structure of urban traffic
+flows", submitted to EURO Working Group on Transportation Meeting, EWGT 2019
+
+```{r child = 'env.Rmd'}
+```
+
+Load necessary libraries
+----------------
+```{r libs}
+memory.limit(size=1024*128)
+library(needs)
+needs(tidyverse)
+needs(reshape2)
+needs(ggplot2)
+needs(geosphere)
+needs(igraph)
+needs(Metrics)
+needs(imputeTS)
+needs(e1071)
+needs(MTS)
+needs(forecast)
+needs(doParallel)
+
+source(file.path("R","prepare_data_functions.R"))
+source(file.path("R","cv_functions.R"))
+```
+
+
+```{r sampling}
+config.tibble <- readRDS(config.rds)
+config.nodes <- CombineToNodes(config.tibble)
+shortest.distances<-CalculateShortestDistances(config.nodes)
+
+#mn.centre <- list(lon=-93.2650,lat=44.9778)
+#central.node<-config.nodes%>%rowwise%>%
+#  mutate(to_centre = distHaversine(c(mn.centre$lon,mn.centre$lat),c(node_lon,node_lat)))%>%ungroup%>%
+#  filter(to_centre==min(to_centre))%>%select(node_name)%>%first%>%unlist
+central.node<-config.nodes%>% filter(node_station_id=="S567")%>%select(node_name)%>%first%>%unlist
+max.distance.time<-20
+
+res<- GetNetwork(central.node,shortest.distances,max.distance.time)
+length(res)
+
+ta <- 1
+data <-readRDS(file.path(data.folder.prepared,paste0("working-",ta,"mins.rds")))
+
+series<-paste0(res,".volume")
+dat <- data%>%filter(node %in% series)
+series<-dat%>%distinct(node)%>%unlist
+
+dat <- filterAnomalies(dat,frequency=7*24*60/ta)
+
+series<-dat%>%group_by(node)%>%summarise(sd=sd(prepared))%>%filter(sd>0.1)%>%select(node)%>%pull
+
+res<-gsub(".volume","",series)
+g<-GetGraph(res, all.links)
+length(res)
+is.connected(g)
+plot(g)
+
+dat <- dat%>%filter(node %in% series)%>%spread(key = node, value = prepared)
+shortest.distances<-shortest.distances[res,res]
+```
