@@ -132,6 +132,8 @@ $(document).ready(function () {
 <div id="configuration" class="section level1">
 <h1>Configuration</h1>
 <pre class="r"><code># Downloaded data folder
+dir.create(file.path(getwd(),&quot;data&quot;), showWarnings = FALSE)
+
 data.folder.downloaded &lt;- file.path(getwd(),&quot;data&quot;,&quot;downloaded&quot;)
 dir.create(data.folder.downloaded, showWarnings = FALSE)
 data.folder.tmp &lt;- file.path(getwd(),&quot;data&quot;,&quot;tmp&quot;)
@@ -150,10 +152,10 @@ dir.create(config.folder, showWarnings = FALSE)
 download.website &lt;- &quot;http://www.d.umn.edu/tdrl/traffic/&quot;
 
 # Setup the first date for downloading
-download.start.date &lt;- as.Date(&quot;20180901&quot;, format=&quot;%Y%m%d&quot;)
+download.start.date &lt;- as.Date(&quot;20180701&quot;, format=&quot;%Y%m%d&quot;)
 
 # Setup number of days for downloading
-download.days &lt;- 7
+download.days &lt;- 7*10
 
 # Define remote file names
 download.files &lt;- paste0(format(seq(download.start.date, by = &quot;day&quot;, length.out = download.days),
@@ -173,29 +175,410 @@ impute.limit &lt;- 0.2</code></pre>
 <h2>Load necessary libraries</h2>
 <pre class="r"><code>memory.limit(size=1024*128)</code></pre>
 <pre><code>[1] 131072</code></pre>
-<pre class="r"><code>library(needs)
-needs(tidyverse)
+<pre class="r"><code>library(needs)</code></pre>
+<pre><code>Warning: package 'needs' was built under R version 3.4.4</code></pre>
+<pre class="r"><code>needs(tidyverse)
 
 source(file.path(&quot;R&quot;,&quot;prepare_data_functions.R&quot;))</code></pre>
 </div>
 <div id="transform-data" class="section level2">
 <h2>Transform data</h2>
 <pre class="r"><code>if (!file.exists(config.rds)){
-  LoadConfigData(config.file.gz) %&gt;% filter(!is.na(detector_name)) %&gt;% saveRDS(config.rds)
+  LoadConfigData(config.file.gz) %&gt;% saveRDS(config.rds)
   print(&quot;Configuration file is parsed&quot;)
 }else{
   print(&quot;Parsed configuration file exists - skipped&quot;)
 }</code></pre>
 <pre><code>[1] &quot;Parsed configuration file exists - skipped&quot;</code></pre>
 <pre class="r"><code>config.tibble &lt;- readRDS(config.rds)</code></pre>
-<pre class="r"><code>TransformToCSV(config.tibble, data.folder.downloaded,data.folder.tmp, verbose = T)</code></pre>
-<pre><code>[1] &quot;CSV file exists. Skipping 20180901&quot;
+<pre class="r"><code>TransformToCSV(config.tibble %&gt;% filter(!is.na(detector_name)), 
+               data.folder.downloaded,data.folder.tmp, verbose = T)</code></pre>
+<pre><code>[1] &quot;Loading raw data 20180701&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180701.traffic&quot;</code></pre>
+<pre><code>Warning: package 'bindrcpp' was built under R version 3.4.4</code></pre>
+<pre><code>[1] &quot;Raw data loaded. Number of detectors: 6291&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5590&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180701.csv&quot;
+[1] &quot;Loading raw data 20180702&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180702.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6445&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5722&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180702.csv&quot;
+[1] &quot;Loading raw data 20180703&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180703.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6388&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5664&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180703.csv&quot;
+[1] &quot;Loading raw data 20180704&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180704.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6388&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5664&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180704.csv&quot;
+[1] &quot;Loading raw data 20180705&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180705.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6388&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5664&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180705.csv&quot;
+[1] &quot;Loading raw data 20180706&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180706.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6388&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5664&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180706.csv&quot;
+[1] &quot;Loading raw data 20180707&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180707.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6384&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5660&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180707.csv&quot;
+[1] &quot;Loading raw data 20180708&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180708.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6363&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5640&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180708.csv&quot;
+[1] &quot;Loading raw data 20180709&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180709.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6412&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5678&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180709.csv&quot;
+[1] &quot;Loading raw data 20180710&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180710.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6418&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5682&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180710.csv&quot;
+[1] &quot;Loading raw data 20180711&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180711.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6436&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5692&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180711.csv&quot;
+[1] &quot;Loading raw data 20180712&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180712.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6436&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5692&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180712.csv&quot;
+[1] &quot;Loading raw data 20180713&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180713.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6451&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5704&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180713.csv&quot;
+[1] &quot;Loading raw data 20180714&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180714.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6451&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5704&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180714.csv&quot;
+[1] &quot;Loading raw data 20180715&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180715.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6449&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5704&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180715.csv&quot;
+[1] &quot;Loading raw data 20180716&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180716.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6495&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5748&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180716.csv&quot;
+[1] &quot;Loading raw data 20180717&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180717.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6497&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5752&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180717.csv&quot;
+[1] &quot;Loading raw data 20180718&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180718.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6488&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5746&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180718.csv&quot;
+[1] &quot;Loading raw data 20180719&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180719.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6505&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5760&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180719.csv&quot;
+[1] &quot;Loading raw data 20180720&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180720.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6499&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5756&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180720.csv&quot;
+[1] &quot;Loading raw data 20180721&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180721.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6499&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5756&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180721.csv&quot;
+[1] &quot;Loading raw data 20180722&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180722.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6499&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5756&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180722.csv&quot;
+[1] &quot;Loading raw data 20180723&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180723.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6499&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5756&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180723.csv&quot;
+[1] &quot;Loading raw data 20180724&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180724.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6505&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5760&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180724.csv&quot;
+[1] &quot;Loading raw data 20180725&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180725.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6541&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5794&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180725.csv&quot;
+[1] &quot;Loading raw data 20180726&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180726.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6572&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5822&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180726.csv&quot;
+[1] &quot;Loading raw data 20180727&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180727.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6567&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5812&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180727.csv&quot;
+[1] &quot;Loading raw data 20180728&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180728.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6568&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5812&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180728.csv&quot;
+[1] &quot;Loading raw data 20180729&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180729.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6553&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5798&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180729.csv&quot;
+[1] &quot;Loading raw data 20180730&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180730.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6575&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5822&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180730.csv&quot;
+[1] &quot;Loading raw data 20180731&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180731.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6575&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5820&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180731.csv&quot;
+[1] &quot;Loading raw data 20180801&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180801.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6607&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5846&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180801.csv&quot;
+[1] &quot;Loading raw data 20180802&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180802.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6601&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5842&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180802.csv&quot;
+[1] &quot;Loading raw data 20180803&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180803.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6602&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5842&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180803.csv&quot;
+[1] &quot;Loading raw data 20180804&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180804.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6590&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5828&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180804.csv&quot;
+[1] &quot;Loading raw data 20180805&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180805.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6576&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5816&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180805.csv&quot;
+[1] &quot;Loading raw data 20180806&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180806.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6635&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5844&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180806.csv&quot;
+[1] &quot;Loading raw data 20180807&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180807.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6602&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5840&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180807.csv&quot;
+[1] &quot;Loading raw data 20180808&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180808.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6634&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5848&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180808.csv&quot;
+[1] &quot;Loading raw data 20180809&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180809.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6614&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5848&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180809.csv&quot;
+[1] &quot;Loading raw data 20180810&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180810.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6605&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5840&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180810.csv&quot;
+[1] &quot;Loading raw data 20180811&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180811.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6605&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5840&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180811.csv&quot;
+[1] &quot;Loading raw data 20180812&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180812.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6595&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5828&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180812.csv&quot;
+[1] &quot;Loading raw data 20180813&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180813.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6606&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5840&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180813.csv&quot;
+[1] &quot;Loading raw data 20180814&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180814.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6635&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5872&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180814.csv&quot;
+[1] &quot;Loading raw data 20180815&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180815.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6659&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5900&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180815.csv&quot;
+[1] &quot;Loading raw data 20180816&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180816.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6695&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5932&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180816.csv&quot;
+[1] &quot;Loading raw data 20180817&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180817.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6693&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5932&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180817.csv&quot;
+[1] &quot;Loading raw data 20180818&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180818.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6659&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5904&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180818.csv&quot;
+[1] &quot;Loading raw data 20180819&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180819.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6660&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5904&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180819.csv&quot;
+[1] &quot;Loading raw data 20180820&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180820.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6673&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5916&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180820.csv&quot;
+[1] &quot;Loading raw data 20180821&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180821.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6702&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5924&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180821.csv&quot;
+[1] &quot;Loading raw data 20180822&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180822.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6722&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5940&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180822.csv&quot;
+[1] &quot;Loading raw data 20180823&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180823.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6726&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5940&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180823.csv&quot;
+[1] &quot;Loading raw data 20180824&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180824.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6712&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5936&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180824.csv&quot;
+[1] &quot;Loading raw data 20180825&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180825.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6704&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5924&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180825.csv&quot;
+[1] &quot;Loading raw data 20180826&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180826.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6706&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5924&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180826.csv&quot;
+[1] &quot;Loading raw data 20180827&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180827.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6710&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5928&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180827.csv&quot;
+[1] &quot;Loading raw data 20180828&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180828.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6668&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5876&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180828.csv&quot;
+[1] &quot;Loading raw data 20180829&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180829.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6718&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5932&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180829.csv&quot;
+[1] &quot;Loading raw data 20180830&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180830.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6720&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5932&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180830.csv&quot;
+[1] &quot;Loading raw data 20180831&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180831.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6703&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5918&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180831.csv&quot;
+[1] &quot;CSV file exists. Skipping 20180901&quot;
 [1] &quot;CSV file exists. Skipping 20180902&quot;
 [1] &quot;CSV file exists. Skipping 20180903&quot;
 [1] &quot;CSV file exists. Skipping 20180904&quot;
 [1] &quot;CSV file exists. Skipping 20180905&quot;
 [1] &quot;CSV file exists. Skipping 20180906&quot;
-[1] &quot;CSV file exists. Skipping 20180907&quot;</code></pre>
+[1] &quot;CSV file exists. Skipping 20180907&quot;
+[1] &quot;Loading raw data 20180908&quot;
+[1] &quot;Unzipping  C:/Dmitry/projects/postdoc/data/downloaded/20180908.traffic&quot;
+[1] &quot;Raw data loaded. Number of detectors: 6713&quot;
+[1] &quot;Combining data to nodes&quot;
+[1] &quot;Node data combined. Number of time series 5936&quot;
+[1] &quot;Saving C:/Dmitry/projects/postdoc/data/tmp/20180908.csv&quot;</code></pre>
 <pre class="r"><code># Prepare working datasets
 
 if (!file.exists(data.rds)){
@@ -209,18 +592,24 @@ LoadMassiveData(data.folder.tmp, download.start.date, number_of_days=download.da
 <pre><code>[1] &quot;RDS data exists - skipped&quot;</code></pre>
 <pre class="r"><code>data.raw&lt;-readRDS(data.rds)
 for (ta in c(12,6,4,3,2,1)){
-  print(paste(&quot;Preparing data for time aggregation&quot;,ta,&quot;mins&quot;))
-  data&lt;-AggregateData(data.raw, ta*2)%&gt;%DropOrImpute(imputeLimit=impute.limit)
-  series&lt;-colnames(data%&gt;%select(-datetime))
-  data%&gt;%gather(series,key='node', value='value')%&gt;%group_by(node)%&gt;%
-  saveRDS(file.path(data.folder.prepared,paste0(&quot;working-&quot;,ta,&quot;mins.rds&quot;)))
+  a.rds &lt;- file.path(data.folder.prepared,paste0(&quot;working-&quot;,ta,&quot;mins.rds&quot;))
+  if(!file.exists(a.rds)){
+    print(paste(&quot;Preparing data for time aggregation&quot;,ta,&quot;mins&quot;))
+    data&lt;-AggregateData(data.raw, ta*2)%&gt;%DropOrImpute(imputeLimit=impute.limit)
+    series&lt;-colnames(data%&gt;%select(-datetime))
+    data%&gt;%gather(series,key='node', value='value')%&gt;%group_by(node)%&gt;%
+    saveRDS(a.rds)
+    print(paste(&quot;Aggregated data for period&quot;,ta,&quot; saved&quot;))
+  }else{
+    print(paste(&quot;Aggregated data exists for period&quot;,ta,&quot; - skipped&quot;))
+  }
 }</code></pre>
-<pre><code>[1] &quot;Preparing data for time aggregation 12 mins&quot;
-[1] &quot;Preparing data for time aggregation 6 mins&quot;
-[1] &quot;Preparing data for time aggregation 4 mins&quot;
-[1] &quot;Preparing data for time aggregation 3 mins&quot;
-[1] &quot;Preparing data for time aggregation 2 mins&quot;
-[1] &quot;Preparing data for time aggregation 1 mins&quot;</code></pre>
+<pre><code>[1] &quot;Aggregated data exists for period 12  - skipped&quot;
+[1] &quot;Aggregated data exists for period 6  - skipped&quot;
+[1] &quot;Aggregated data exists for period 4  - skipped&quot;
+[1] &quot;Aggregated data exists for period 3  - skipped&quot;
+[1] &quot;Aggregated data exists for period 2  - skipped&quot;
+[1] &quot;Aggregated data exists for period 1  - skipped&quot;</code></pre>
 </div>
 </div>
 

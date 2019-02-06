@@ -43,7 +43,7 @@ shortest.distances<-CalculateShortestDistances(config.nodes)
 #  mutate(to_centre = distHaversine(c(mn.centre$lon,mn.centre$lat),c(node_lon,node_lat)))%>%ungroup%>%
 #  filter(to_centre==min(to_centre))%>%select(node_name)%>%first%>%unlist
 central.node<-config.nodes%>% filter(node_station_id=="S567")%>%select(node_name)%>%first%>%unlist
-max.distance.time<-20
+max.distance.time<-12
 
 res<- GetNetwork(central.node,shortest.distances,max.distance.time)
 length(res)
@@ -51,7 +51,7 @@ length(res)
 ta <- 1
 data <-readRDS(file.path(data.folder.prepared,paste0("working-",ta,"mins.rds")))
 
-series<-paste0(res,".volume")
+series<-paste0(names(res),".volume")
 dat <- data%>%filter(node %in% series)
 series<-dat%>%distinct(node)%>%unlist
 

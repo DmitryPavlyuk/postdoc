@@ -135,6 +135,8 @@ $(document).ready(function () {
 <div id="configuration" class="section level1">
 <h1>Configuration</h1>
 <pre class="r"><code># Downloaded data folder
+dir.create(file.path(getwd(),&quot;data&quot;), showWarnings = FALSE)
+
 data.folder.downloaded &lt;- file.path(getwd(),&quot;data&quot;,&quot;downloaded&quot;)
 dir.create(data.folder.downloaded, showWarnings = FALSE)
 data.folder.tmp &lt;- file.path(getwd(),&quot;data&quot;,&quot;tmp&quot;)
@@ -153,10 +155,10 @@ dir.create(config.folder, showWarnings = FALSE)
 download.website &lt;- &quot;http://www.d.umn.edu/tdrl/traffic/&quot;
 
 # Setup the first date for downloading
-download.start.date &lt;- as.Date(&quot;20180901&quot;, format=&quot;%Y%m%d&quot;)
+download.start.date &lt;- as.Date(&quot;20180701&quot;, format=&quot;%Y%m%d&quot;)
 
 # Setup number of days for downloading
-download.days &lt;- 7
+download.days &lt;- 7*10
 
 # Define remote file names
 download.files &lt;- paste0(format(seq(download.start.date, by = &quot;day&quot;, length.out = download.days),
@@ -168,7 +170,10 @@ config.filename.gz &lt;- paste0(config.filename,&quot;.gz&quot;)
 config.url&lt;-paste0(&quot;http://data.dot.state.mn.us/iris_xml/&quot;,config.filename.gz)
 config.file.gz &lt;- file.path(config.folder, config.filename.gz)
 config.file &lt;- file.path(config.folder, config.filename)
-config.rds &lt;- file.path(data.folder.prepared, &quot;config.rds&quot;)</code></pre>
+config.rds &lt;- file.path(data.folder.prepared, &quot;config.rds&quot;)
+data.rds &lt;- file.path(data.folder.prepared,&quot;working-raw.rds&quot;)
+
+impute.limit &lt;- 0.2</code></pre>
 <div id="downloading" class="section level2">
 <h2>Downloading</h2>
 <pre class="r"><code># Download data files
@@ -181,18 +186,104 @@ for (f in download.files){
     print(paste(&quot;Local data file exists:&quot;, f,&quot;- download skipped&quot;))
   }
 }</code></pre>
-<pre><code>[1] &quot;Data file download complete:  20180901.traffic&quot;
-[1] &quot;Data file download complete:  20180902.traffic&quot;
-[1] &quot;Data file download complete:  20180903.traffic&quot;
-[1] &quot;Data file download complete:  20180904.traffic&quot;
-[1] &quot;Data file download complete:  20180905.traffic&quot;
-[1] &quot;Data file download complete:  20180906.traffic&quot;
-[1] &quot;Data file download complete:  20180907.traffic&quot;</code></pre>
+<pre><code>[1] &quot;Data file download complete:  20180701.traffic&quot;
+[1] &quot;Data file download complete:  20180702.traffic&quot;
+[1] &quot;Data file download complete:  20180703.traffic&quot;
+[1] &quot;Data file download complete:  20180704.traffic&quot;
+[1] &quot;Data file download complete:  20180705.traffic&quot;
+[1] &quot;Data file download complete:  20180706.traffic&quot;
+[1] &quot;Data file download complete:  20180707.traffic&quot;
+[1] &quot;Data file download complete:  20180708.traffic&quot;
+[1] &quot;Data file download complete:  20180709.traffic&quot;
+[1] &quot;Data file download complete:  20180710.traffic&quot;
+[1] &quot;Data file download complete:  20180711.traffic&quot;
+[1] &quot;Data file download complete:  20180712.traffic&quot;
+[1] &quot;Data file download complete:  20180713.traffic&quot;
+[1] &quot;Data file download complete:  20180714.traffic&quot;
+[1] &quot;Data file download complete:  20180715.traffic&quot;
+[1] &quot;Data file download complete:  20180716.traffic&quot;
+[1] &quot;Data file download complete:  20180717.traffic&quot;
+[1] &quot;Data file download complete:  20180718.traffic&quot;
+[1] &quot;Data file download complete:  20180719.traffic&quot;
+[1] &quot;Data file download complete:  20180720.traffic&quot;
+[1] &quot;Data file download complete:  20180721.traffic&quot;
+[1] &quot;Data file download complete:  20180722.traffic&quot;
+[1] &quot;Data file download complete:  20180723.traffic&quot;
+[1] &quot;Data file download complete:  20180724.traffic&quot;
+[1] &quot;Data file download complete:  20180725.traffic&quot;
+[1] &quot;Data file download complete:  20180726.traffic&quot;
+[1] &quot;Data file download complete:  20180727.traffic&quot;
+[1] &quot;Data file download complete:  20180728.traffic&quot;
+[1] &quot;Data file download complete:  20180729.traffic&quot;
+[1] &quot;Data file download complete:  20180730.traffic&quot;
+[1] &quot;Data file download complete:  20180731.traffic&quot;
+[1] &quot;Data file download complete:  20180801.traffic&quot;
+[1] &quot;Data file download complete:  20180802.traffic&quot;
+[1] &quot;Data file download complete:  20180803.traffic&quot;
+[1] &quot;Data file download complete:  20180804.traffic&quot;
+[1] &quot;Data file download complete:  20180805.traffic&quot;
+[1] &quot;Data file download complete:  20180806.traffic&quot;
+[1] &quot;Data file download complete:  20180807.traffic&quot;
+[1] &quot;Data file download complete:  20180808.traffic&quot;
+[1] &quot;Data file download complete:  20180809.traffic&quot;
+[1] &quot;Data file download complete:  20180810.traffic&quot;
+[1] &quot;Data file download complete:  20180811.traffic&quot;
+[1] &quot;Data file download complete:  20180812.traffic&quot;
+[1] &quot;Data file download complete:  20180813.traffic&quot;
+[1] &quot;Data file download complete:  20180814.traffic&quot;
+[1] &quot;Data file download complete:  20180815.traffic&quot;
+[1] &quot;Data file download complete:  20180816.traffic&quot;
+[1] &quot;Data file download complete:  20180817.traffic&quot;
+[1] &quot;Data file download complete:  20180818.traffic&quot;
+[1] &quot;Data file download complete:  20180819.traffic&quot;
+[1] &quot;Data file download complete:  20180820.traffic&quot;
+[1] &quot;Data file download complete:  20180821.traffic&quot;
+[1] &quot;Data file download complete:  20180822.traffic&quot;
+[1] &quot;Data file download complete:  20180823.traffic&quot;
+[1] &quot;Data file download complete:  20180824.traffic&quot;
+[1] &quot;Data file download complete:  20180825.traffic&quot;
+[1] &quot;Data file download complete:  20180826.traffic&quot;
+[1] &quot;Data file download complete:  20180827.traffic&quot;
+[1] &quot;Data file download complete:  20180828.traffic&quot;
+[1] &quot;Data file download complete:  20180829.traffic&quot;
+[1] &quot;Data file download complete:  20180830.traffic&quot;
+[1] &quot;Data file download complete:  20180831.traffic&quot;
+[1] &quot;Local data file exists: 20180901.traffic - download skipped&quot;
+[1] &quot;Local data file exists: 20180902.traffic - download skipped&quot;
+[1] &quot;Local data file exists: 20180903.traffic - download skipped&quot;
+[1] &quot;Local data file exists: 20180904.traffic - download skipped&quot;
+[1] &quot;Local data file exists: 20180905.traffic - download skipped&quot;
+[1] &quot;Local data file exists: 20180906.traffic - download skipped&quot;
+[1] &quot;Local data file exists: 20180907.traffic - download skipped&quot;
+[1] &quot;Data file download complete:  20180908.traffic&quot;</code></pre>
 <pre class="r"><code># List downloaded files
 print(list.files(data.folder.downloaded))</code></pre>
-<pre><code>[1] &quot;20180901.traffic&quot; &quot;20180902.traffic&quot; &quot;20180903.traffic&quot;
-[4] &quot;20180904.traffic&quot; &quot;20180905.traffic&quot; &quot;20180906.traffic&quot;
-[7] &quot;20180907.traffic&quot;</code></pre>
+<pre><code> [1] &quot;20180701.traffic&quot; &quot;20180702.traffic&quot; &quot;20180703.traffic&quot;
+ [4] &quot;20180704.traffic&quot; &quot;20180705.traffic&quot; &quot;20180706.traffic&quot;
+ [7] &quot;20180707.traffic&quot; &quot;20180708.traffic&quot; &quot;20180709.traffic&quot;
+[10] &quot;20180710.traffic&quot; &quot;20180711.traffic&quot; &quot;20180712.traffic&quot;
+[13] &quot;20180713.traffic&quot; &quot;20180714.traffic&quot; &quot;20180715.traffic&quot;
+[16] &quot;20180716.traffic&quot; &quot;20180717.traffic&quot; &quot;20180718.traffic&quot;
+[19] &quot;20180719.traffic&quot; &quot;20180720.traffic&quot; &quot;20180721.traffic&quot;
+[22] &quot;20180722.traffic&quot; &quot;20180723.traffic&quot; &quot;20180724.traffic&quot;
+[25] &quot;20180725.traffic&quot; &quot;20180726.traffic&quot; &quot;20180727.traffic&quot;
+[28] &quot;20180728.traffic&quot; &quot;20180729.traffic&quot; &quot;20180730.traffic&quot;
+[31] &quot;20180731.traffic&quot; &quot;20180801.traffic&quot; &quot;20180802.traffic&quot;
+[34] &quot;20180803.traffic&quot; &quot;20180804.traffic&quot; &quot;20180805.traffic&quot;
+[37] &quot;20180806.traffic&quot; &quot;20180807.traffic&quot; &quot;20180808.traffic&quot;
+[40] &quot;20180809.traffic&quot; &quot;20180810.traffic&quot; &quot;20180811.traffic&quot;
+[43] &quot;20180812.traffic&quot; &quot;20180813.traffic&quot; &quot;20180814.traffic&quot;
+[46] &quot;20180815.traffic&quot; &quot;20180816.traffic&quot; &quot;20180817.traffic&quot;
+[49] &quot;20180818.traffic&quot; &quot;20180819.traffic&quot; &quot;20180820.traffic&quot;
+[52] &quot;20180821.traffic&quot; &quot;20180822.traffic&quot; &quot;20180823.traffic&quot;
+[55] &quot;20180824.traffic&quot; &quot;20180825.traffic&quot; &quot;20180826.traffic&quot;
+[58] &quot;20180827.traffic&quot; &quot;20180828.traffic&quot; &quot;20180829.traffic&quot;
+[61] &quot;20180830.traffic&quot; &quot;20180831.traffic&quot; &quot;20180901&quot;        
+[64] &quot;20180901.traffic&quot; &quot;20180902&quot;         &quot;20180902.traffic&quot;
+[67] &quot;20180903&quot;         &quot;20180903.traffic&quot; &quot;20180904&quot;        
+[70] &quot;20180904.traffic&quot; &quot;20180905&quot;         &quot;20180905.traffic&quot;
+[73] &quot;20180906&quot;         &quot;20180906.traffic&quot; &quot;20180907&quot;        
+[76] &quot;20180907.traffic&quot; &quot;20180908.traffic&quot;</code></pre>
 <pre class="r"><code># Download config file
 if (!file.exists(config.file.gz)){
   download.file(config.url, config.file.gz,mode = &quot;wb&quot;)
@@ -200,7 +291,7 @@ if (!file.exists(config.file.gz)){
 }else{
   print(paste(&quot;Config file exists:&quot;, config.filename.gz,&quot;- download skipped&quot;))
 }</code></pre>
-<pre><code>[1] &quot;Config file download complete: metro_config.xml.gz&quot;</code></pre>
+<pre><code>[1] &quot;Config file exists: metro_config.xml.gz - download skipped&quot;</code></pre>
 </div>
 </div>
 

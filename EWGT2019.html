@@ -132,6 +132,8 @@ $(document).ready(function () {
 <div id="configuration" class="section level1">
 <h1>Configuration</h1>
 <pre class="r"><code># Downloaded data folder
+dir.create(file.path(getwd(),&quot;data&quot;), showWarnings = FALSE)
+
 data.folder.downloaded &lt;- file.path(getwd(),&quot;data&quot;,&quot;downloaded&quot;)
 dir.create(data.folder.downloaded, showWarnings = FALSE)
 data.folder.tmp &lt;- file.path(getwd(),&quot;data&quot;,&quot;tmp&quot;)
@@ -173,8 +175,9 @@ impute.limit &lt;- 0.2</code></pre>
 <h2>Load necessary libraries</h2>
 <pre class="r"><code>memory.limit(size=1024*128)</code></pre>
 <pre><code>[1] 131072</code></pre>
-<pre class="r"><code>library(needs)
-needs(tidyverse)
+<pre class="r"><code>library(needs)</code></pre>
+<pre><code>Warning: package 'needs' was built under R version 3.4.4</code></pre>
+<pre class="r"><code>needs(tidyverse)
 needs(reshape2)
 needs(ggplot2)
 needs(geosphere)
@@ -188,6 +191,7 @@ needs(doParallel)
 
 source(file.path(&quot;R&quot;,&quot;prepare_data_functions.R&quot;))
 source(file.path(&quot;R&quot;,&quot;cv_functions.R&quot;))</code></pre>
+<pre><code>Warning: package 'matrixStats' was built under R version 3.4.4</code></pre>
 <pre><code>
 Attaching package: 'matrixStats'</code></pre>
 <pre><code>The following object is masked from 'package:anomalize':
@@ -197,18 +201,20 @@ Attaching package: 'matrixStats'</code></pre>
 
     count</code></pre>
 <pre class="r"><code>config.tibble &lt;- readRDS(config.rds)
-config.nodes &lt;- CombineToNodes(config.tibble)
-shortest.distances&lt;-CalculateShortestDistances(config.nodes)
+config.nodes &lt;- CombineToNodes(config.tibble)</code></pre>
+<pre><code>Warning: package 'bindrcpp' was built under R version 3.4.4</code></pre>
+<pre class="r"><code>shortest.distances&lt;-CalculateShortestDistances(config.nodes)
 
-mn.centre &lt;- list(lon=-93.2650,lat=44.9778)
-central.node&lt;-config.nodes%&gt;%rowwise%&gt;%
-  mutate(to_centre = distHaversine(c(mn.centre$lon,mn.centre$lat),c(node_lon,node_lat)))%&gt;%ungroup%&gt;%
-  filter(to_centre==min(to_centre))%&gt;%select(node_name)%&gt;%first%&gt;%unlist
-max.distance.time&lt;-12
+#mn.centre &lt;- list(lon=-93.2650,lat=44.9778)
+#central.node&lt;-config.nodes%&gt;%rowwise%&gt;%
+#  mutate(to_centre = distHaversine(c(mn.centre$lon,mn.centre$lat),c(node_lon,node_lat)))%&gt;%ungroup%&gt;%
+#  filter(to_centre==min(to_centre))%&gt;%select(node_name)%&gt;%first%&gt;%unlist
+central.node&lt;-config.nodes%&gt;% filter(node_station_id==&quot;S567&quot;)%&gt;%select(node_name)%&gt;%first%&gt;%unlist
+max.distance.time&lt;-20
 
 res&lt;- GetNetwork(central.node,shortest.distances,max.distance.time)
 length(res)</code></pre>
-<pre><code>[1] 4</code></pre>
+<pre><code>[1] 2320</code></pre>
 <pre class="r"><code>ta &lt;- 1
 data &lt;-readRDS(file.path(data.folder.prepared,paste0(&quot;working-&quot;,ta,&quot;mins.rds&quot;)))
 
@@ -221,8 +227,11 @@ dat &lt;- filterAnomalies(dat,frequency=7*24*60/ta)</code></pre>
 <pre class="r"><code>series&lt;-dat%&gt;%group_by(node)%&gt;%summarise(sd=sd(prepared))%&gt;%filter(sd&gt;0.1)%&gt;%select(node)%&gt;%pull
 
 res&lt;-gsub(&quot;.volume&quot;,&quot;&quot;,series)
-g&lt;-get_graph(res, all.links)</code></pre>
-<pre><code>Error in get_graph(res, all.links): could not find function &quot;get_graph&quot;</code></pre>
+g&lt;-GetGraph(res, all.links)</code></pre>
+<pre><code>Warning: Unknown or uninitialised column: 'time'.</code></pre>
+<pre><code>Warning in rep(yes, length.out = length(ans)): 'x' is NULL so the result
+will be NULL</code></pre>
+<pre><code>Error in ans[test &amp; ok] &lt;- rep(yes, length.out = length(ans))[test &amp; ok]: replacement has length zero</code></pre>
 <pre class="r"><code>length(res)</code></pre>
 <pre><code>[1] 0</code></pre>
 <pre class="r"><code>is.connected(g)</code></pre>
