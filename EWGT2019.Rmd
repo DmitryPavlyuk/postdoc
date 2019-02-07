@@ -30,41 +30,110 @@ needs(doParallel)
 
 source(file.path("R","prepare_data_functions.R"))
 source(file.path("R","cv_functions.R"))
+source(file.path("R","cv_utils.R"))
+source(file.path("R","models.R"))
 ```
 
 
 ```{r sampling}
-config.tibble <- readRDS(config.rds)
-config.nodes <- CombineToNodes(config.tibble)
-shortest.distances<-CalculateShortestDistances(config.nodes)
 
-#mn.centre <- list(lon=-93.2650,lat=44.9778)
-#central.node<-config.nodes%>%rowwise%>%
-#  mutate(to_centre = distHaversine(c(mn.centre$lon,mn.centre$lat),c(node_lon,node_lat)))%>%ungroup%>%
-#  filter(to_centre==min(to_centre))%>%select(node_name)%>%first%>%unlist
-central.node<-config.nodes%>% filter(node_station_id=="S567")%>%select(node_name)%>%first%>%unlist
-max.distance.time<-12
+sample.rds <- file.path(data.folder.prepared,"EWGT2019.rds")
+if (!file.exists(sample.rds)){
+  print("Preparing sample")
+  config.tibble <- readRDS(config.rds)
+  config.nodes <- CombineToNodes(config.tibble)
+  shortest.distances<-CalculateShortestDistances(config.nodes)
+  central.node<-config.nodes%>% filter(node_station_id=="S567")%>%
+    select(node_name)%>%first%>%unlist
+  max.distance.time<-6
+  ta <- 1
+  data <-readRDS(file.path(data.folder.prepared,paste0("working-",ta,"mins.rds")))
+  mysample <- GetSample(central.node,
+                        shortest.distances,
+                        max.distance.time,
+                        data, var="volume", frequency=7)
+  saveRDS(mysample,sample.rds)
+}else{
+  print("Sample exists - using saved")
+  mysample <- readRDS(sample.rds)
+}
 
-res<- GetNetwork(central.node,shortest.distances,max.distance.time)
-length(res)
+```
 
-ta <- 1
-data <-readRDS(file.path(data.folder.prepared,paste0("working-",ta,"mins.rds")))
 
-series<-paste0(names(res),".volume")
-dat <- data%>%filter(node %in% series)
-series<-dat%>%distinct(node)%>%unlist
+```{r model}
+series <- colnames(mysample$data)[-1]
+trainingMinutes <- seq(480,480, by=120)
+validationSize <- 7*24*60/ta
+validationEnd <- nrow(mysample$data)
+validationStart <- validationEnd - validationSize
+forecastEvery<-30
+forecastingSteps<-3 #12/ta
 
-dat <- filterAnomalies(dat,frequency=7*24*60/ta)
+# lagMatrix <- round(mysample$shortest.distances / ta)
+# lagMatrix[is.infinite(lagMatrix)]<-0
+# rownames(lagMatrix)<-paste0(rownames(lagMatrix),".volume")
+# colnames(lagMatrix)<-paste0(colnames(lagMatrix),".volume")
+# lagMatrix<-lagMatrix[as.vector(series),as.vector(series)]
 
-series<-dat%>%group_by(node)%>%summarise(sd=sd(prepared))%>%filter(sd>0.1)%>%select(node)%>%pull
 
-res<-gsub(".volume","",series)
-g<-GetGraph(res, all.links)
-length(res)
-is.connected(g)
-plot(g)
 
-dat <- dat%>%filter(node %in% series)%>%spread(key = node, value = prepared)
-shortest.distances<-shortest.distances[res,res]
+
+ results<-tibble()
+# trainingSize <- trainingMinutes[1]/ta
+# dat.restricted<-mysample$data[(validationStart-trainingSize+1):validationEnd,]
+base_params<-list(data=dat.restricted,
+                    seriesNames=series,
+                    forecastingSteps=forecastingSteps,
+                    forecastEvery=forecastEvery)
+
+  params<-c(base_params,list(trainingWindowSize=trainingSize))
+# 
+   res1<-do.call(movingWindow,
+                c(params,list(xModel=xModel.naive)),
+                envir=environment())
+   results<-add_results(results,res1,"naive",trainingSize,ta,forecastingSteps)
+# 
+
+source(file.path("R","cv_functions.R"))
+  
+source(file.path("R","models.R"))
+#results2<-tibble()
+  res<-do.call(rollingWindow,
+               c(params,list(xModel=xModel.naive,clusterNumber=1)),
+               envir=environment())
+  #results2<-add_results(results2,res,"naive",trainingSize,ta,forecastingSteps)
+  
+res%>%group_by(forecast_horizon,detector)%>%summarise(mae=mae(actual,forecasted))%>%
+  group_by(forecast_horizon)%>%summarise(mean=mean(mae))
+
+
+  
+# for (trainingMinute in trainingMinutes){
+#   trainingSize <- trainingMinute/ta
+#   dat.restricted<-mysample$data[(validationStart-trainingSize+1):validationEnd,]
+#   base_params<-list(data=dat.restricted, 
+#                     seriesNames=series,
+#                     forecastingSteps=forecastingSteps, 
+#                     forecastEvery=forecastEvery)
+#   
+#   params<-c(base_params,list(trainingWindowSize=trainingSize))
+# 
+#   res<-do.call(movingWindow,
+#                c(params,list(xModel=xModel.naive)),
+#                envir=environment())
+#   results<-add_results(results,res,"naive",trainingSize,ta,forecastingSteps)
+# 
+#   res<-do.call(movingWindow,
+#                c(params,list(xModel=xModel.autoarima,
+#                              stationary=T, allowdrift =T, allowmean = T)),
+#                envir=environment())
+#   results<-add_results(results,res,"autoArima",trainingSize,ta,forecastingSteps)
+# }
+
+
+results%>%filter(indicator=="MAE")%>%
+  group_by(indicator,model,training_size,                                                                    forecasting_horizon)%>%
+  summarise(mean=mean(value))%>%spread(key=training_size, value=mean)%>%print(n=50)
+
 ```

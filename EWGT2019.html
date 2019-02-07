@@ -152,10 +152,10 @@ dir.create(config.folder, showWarnings = FALSE)
 download.website &lt;- &quot;http://www.d.umn.edu/tdrl/traffic/&quot;
 
 # Setup the first date for downloading
-download.start.date &lt;- as.Date(&quot;20180901&quot;, format=&quot;%Y%m%d&quot;)
+download.start.date &lt;- as.Date(&quot;20180701&quot;, format=&quot;%Y%m%d&quot;)
 
 # Setup number of days for downloading
-download.days &lt;- 7
+download.days &lt;- 7*10
 
 # Define remote file names
 download.files &lt;- paste0(format(seq(download.start.date, by = &quot;day&quot;, length.out = download.days),
@@ -190,57 +190,71 @@ needs(forecast)
 needs(doParallel)
 
 source(file.path(&quot;R&quot;,&quot;prepare_data_functions.R&quot;))
-source(file.path(&quot;R&quot;,&quot;cv_functions.R&quot;))</code></pre>
-<pre><code>Warning: package 'matrixStats' was built under R version 3.4.4</code></pre>
-<pre><code>
-Attaching package: 'matrixStats'</code></pre>
-<pre><code>The following object is masked from 'package:anomalize':
-
-    iqr</code></pre>
-<pre><code>The following object is masked from 'package:dplyr':
-
-    count</code></pre>
-<pre class="r"><code>config.tibble &lt;- readRDS(config.rds)
-config.nodes &lt;- CombineToNodes(config.tibble)</code></pre>
+source(file.path(&quot;R&quot;,&quot;cv_functions.R&quot;))
+source(file.path(&quot;R&quot;,&quot;cv_utils.R&quot;))
+source(file.path(&quot;R&quot;,&quot;models.R&quot;))</code></pre>
+<pre class="r"><code>sample.rds &lt;- file.path(data.folder.prepared,&quot;EWGT2019.rds&quot;)
+if (!file.exists(sample.rds)){
+  print(&quot;Preparing sample&quot;)
+  config.tibble &lt;- readRDS(config.rds)
+  config.nodes &lt;- CombineToNodes(config.tibble)
+  shortest.distances&lt;-CalculateShortestDistances(config.nodes)
+  central.node&lt;-config.nodes%&gt;% filter(node_station_id==&quot;S567&quot;)%&gt;%
+    select(node_name)%&gt;%first%&gt;%unlist
+  max.distance.time&lt;-4
+  ta &lt;- 1
+  data &lt;-readRDS(file.path(data.folder.prepared,paste0(&quot;working-&quot;,ta,&quot;mins.rds&quot;)))
+  mysample &lt;- GetSample(central.node,
+                        shortest.distances,
+                        max.distance.time,
+                        data, var=&quot;volume&quot;, frequency=7)
+  saveRDS(mysample,sample.rds)
+}else{
+  print(&quot;Sample exists - using saved&quot;)
+  mysample &lt;- readRDS(sample.rds)
+}</code></pre>
+<pre><code>[1] &quot;Preparing sample&quot;</code></pre>
 <pre><code>Warning: package 'bindrcpp' was built under R version 3.4.4</code></pre>
-<pre class="r"><code>shortest.distances&lt;-CalculateShortestDistances(config.nodes)
+<pre class="r"><code>series &lt;- colnames(mysample$data)[-1]
+trainingMinutes &lt;- seq(480,480, by=120)
+validationSize &lt;- 7*24*60/ta
+validationEnd &lt;- nrow(mysample$data)
+validationStart &lt;- validationEnd - validationSize
+forecastEvery&lt;-30
+forecastingSteps&lt;-3 #12/ta
 
-#mn.centre &lt;- list(lon=-93.2650,lat=44.9778)
-#central.node&lt;-config.nodes%&gt;%rowwise%&gt;%
-#  mutate(to_centre = distHaversine(c(mn.centre$lon,mn.centre$lat),c(node_lon,node_lat)))%&gt;%ungroup%&gt;%
-#  filter(to_centre==min(to_centre))%&gt;%select(node_name)%&gt;%first%&gt;%unlist
-central.node&lt;-config.nodes%&gt;% filter(node_station_id==&quot;S567&quot;)%&gt;%select(node_name)%&gt;%first%&gt;%unlist
-max.distance.time&lt;-20
+lagMatrix &lt;- round(mysample$shortest.distances / ta)
+lagMatrix[is.infinite(lagMatrix)]&lt;-0
+rownames(lagMatrix)&lt;-paste0(rownames(lagMatrix),&quot;.volume&quot;)
+colnames(lagMatrix)&lt;-paste0(colnames(lagMatrix),&quot;.volume&quot;)
+lagMatrix&lt;-lagMatrix[as.vector(series),as.vector(series)]
 
-res&lt;- GetNetwork(central.node,shortest.distances,max.distance.time)
-length(res)</code></pre>
-<pre><code>[1] 2320</code></pre>
-<pre class="r"><code>ta &lt;- 1
-data &lt;-readRDS(file.path(data.folder.prepared,paste0(&quot;working-&quot;,ta,&quot;mins.rds&quot;)))
 
-series&lt;-paste0(res,&quot;.volume&quot;)
-dat &lt;- data%&gt;%filter(node %in% series)
-series&lt;-dat%&gt;%distinct(node)%&gt;%unlist
 
-dat &lt;- filterAnomalies(dat,frequency=7*24*60/ta)</code></pre>
-<pre><code>Error in .data_nested[[.key_char]][[1]]: subscript out of bounds</code></pre>
-<pre class="r"><code>series&lt;-dat%&gt;%group_by(node)%&gt;%summarise(sd=sd(prepared))%&gt;%filter(sd&gt;0.1)%&gt;%select(node)%&gt;%pull
+results&lt;-tibble()
+for (trainingMinute in trainingMinutes){
+  trainingSize &lt;- trainingMinute/ta
+  dat.restricted&lt;-mysample$data[(validationStart-trainingSize+1):validationEnd,]
+  base_params&lt;-list(data=dat.restricted, 
+                    seriesNames=series,
+                    forecastingSteps=forecastingSteps, 
+                    forecastEvery=forecastEvery)
+  
+  params&lt;-c(base_params,list(trainingWindowSize=trainingSize))
 
-res&lt;-gsub(&quot;.volume&quot;,&quot;&quot;,series)
-g&lt;-GetGraph(res, all.links)</code></pre>
-<pre><code>Warning: Unknown or uninitialised column: 'time'.</code></pre>
-<pre><code>Warning in rep(yes, length.out = length(ans)): 'x' is NULL so the result
-will be NULL</code></pre>
-<pre><code>Error in ans[test &amp; ok] &lt;- rep(yes, length.out = length(ans))[test &amp; ok]: replacement has length zero</code></pre>
-<pre class="r"><code>length(res)</code></pre>
-<pre><code>[1] 0</code></pre>
-<pre class="r"><code>is.connected(g)</code></pre>
-<pre><code>Error in &quot;igraph&quot; %in% class(graph): object 'g' not found</code></pre>
-<pre class="r"><code>plot(g)</code></pre>
-<pre><code>Error in plot(g): object 'g' not found</code></pre>
-<pre class="r"><code>dat &lt;- dat%&gt;%filter(node %in% series)%&gt;%spread(key = node, value = prepared)</code></pre>
-<pre><code>Error in eval_tidy(enquo(var), var_env): object 'prepared' not found</code></pre>
-<pre class="r"><code>shortest.distances&lt;-shortest.distances[res,res]</code></pre>
+  res&lt;-do.call(movingWindow,
+               c(params,list(xModel=xModel.naive)),
+               envir=environment())
+  results&lt;-add_results(results,res,&quot;naive&quot;,trainingSize,ta,forecastingSteps)
+
+  res&lt;-do.call(movingWindow,
+               c(params,list(xModel=xModel.autoarima,
+                             stationary=T, allowdrift =T, allowmean = T)),
+               envir=environment())
+  results&lt;-add_results(results,res,&quot;autoArima&quot;,trainingSize,ta,forecastingSteps)
+}</code></pre>
+<pre><code>[1] &quot;Models to estimate:  336 , from  2018-09-01 16:01:00  to  2018-09-08 15:31:00&quot;
+[1] &quot;Models to estimate:  336 , from  2018-09-01 16:01:00  to  2018-09-08 15:31:00&quot;</code></pre>
 </div>
 </div>
 

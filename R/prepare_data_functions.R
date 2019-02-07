@@ -385,3 +385,16 @@ CalculateShortestDistances <-function(config.nodes){
   shA<-prepare_shortest_distances(allnodes,all.links,useTime=T)
   return(shA)
 }
+
+GetSample <- function(central.node,shortest.distances,max.distance.time, data, var, frequency=7){
+  res<- GetNetwork(central.node,shortest.distances,max.distance.time)
+  series<-paste0(names(res),".",var)
+  dat <- data%>%filter(node %in% series)
+  series<-dat%>%distinct(node)%>%unlist
+  dat <- filterAnomalies(dat,frequency=frequency*24*60/ta)
+  series<-dat%>%group_by(node)%>%summarise(sd=sd(prepared))%>%filter(sd>0.1)%>%select(node)%>%pull
+  res<-gsub(paste0(".",var),"",series)
+  dat <- dat%>%filter(node %in% series)%>%spread(key = node, value = prepared)
+  
+  return(list(data=dat, shortest.distances=shortest.distances[res,res]))
+}
