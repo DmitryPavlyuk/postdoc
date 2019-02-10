@@ -3,6 +3,8 @@ title: "Data transformation"
 author: "Dmitry Pavlyuk"
 date: "February 6, 2019"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 This document provides a routine for transforming traffic data to usable R tibbles. We suppose that data in ADUS  (.traffic) format are downloaded using [data collection markdown](./data_collection.Rmd). 
@@ -13,7 +15,7 @@ This document provides a routine for transforming traffic data to usable R tibbl
 Load necessary libraries
 ----------------
 ```{r libs}
-memory.limit(size=1024*128)
+memory.limit(size=1024*1024)
 library(needs)
 needs(tidyverse)
 
@@ -40,31 +42,29 @@ TransformToCSV(config.tibble %>% filter(!is.na(detector_name)),
 
 ```{r transform_data_to_rds}
 # Prepare working datasets
-
-if (!file.exists(data.rds)){
-LoadMassiveData(data.folder.tmp, download.start.date, number_of_days=download.days, block_size=1*7)%>%
-  mutate(dow=weekdays(datetime))%>%mutate(dow_time=paste(dow,format(datetime, "%H:%M"))) %>%
-  saveRDS(data.rds)
-  print("RDS data file saved")
-}else{
-  print("RDS data exists - skipped")
-}
+  blocks <- LoadMassiveData(data.folder.tmp, download.start.date, 
+                         number_of_days=download.days, block_size=block.size, 
+                         save_block=T, save_folder=data.folder.prepared,
+                         save_name=data.rds.file)
+  print(paste("Saved data blocks", blocks))
+  
+  #dat%>%mutate(dow=weekdays(datetime))%>%mutate(dow_time=paste(dow,format(datetime, "%H:%M"))) %>%
 ```
 
 ```{r aggregate}
-data.raw<-readRDS(data.rds)
-for (ta in c(12,6,4,3,2,1)){
-  a.rds <- file.path(data.folder.prepared,paste0("working-",ta,"mins.rds"))
-  if(!file.exists(a.rds)){
-    print(paste("Preparing data for time aggregation",ta,"mins"))
-    data<-AggregateData(data.raw, ta*2)%>%DropOrImpute(imputeLimit=impute.limit)
-    series<-colnames(data%>%select(-datetime))
-    data%>%gather(series,key='node', value='value')%>%group_by(node)%>%
-    saveRDS(a.rds)
-    print(paste("Aggregated data for period",ta," saved"))
-  }else{
-    print(paste("Aggregated data exists for period",ta," - skipped"))
-  }
-}
+# data.raw<-readRDS(data.rds)
+# for (ta in c(12,6,4,3,2,1)){
+#   a.rds <- file.path(data.folder.prepared,paste0("working-",ta,"mins.rds"))
+#   if(!file.exists(a.rds)){
+#     print(paste("Preparing data for time aggregation",ta,"mins"))
+#     data<-AggregateData(data.raw, ta*2)%>%DropOrImpute(imputeLimit=impute.limit)
+#     series<-colnames(data%>%select(-datetime))
+#     data%>%gather(series,key='node', value='value')%>%group_by(node)%>%
+#     saveRDS(a.rds)
+#     print(paste("Aggregated data for period",ta," saved"))
+#   }else{
+#     print(paste("Aggregated data exists for period",ta," - skipped"))
+#   }
+# }
 ```
 

@@ -47,11 +47,81 @@ if (!file.exists(sample.rds)){
     select(node_name)%>%first%>%unlist
   max.distance.time<-6
   ta <- 1
-  data <-readRDS(file.path(data.folder.prepared,paste0("working-",ta,"mins.rds")))
-  mysample <- GetSample(central.node,
-                        shortest.distances,
-                        max.distance.time,
-                        data, var="volume", frequency=7)
+  weeks <- 1:40
+  
+  res<- GetNetwork(central.node,shortest.distances,max.distance.time)
+  series<-paste0(names(res),".volume")
+  
+  
+  
+  
+  dat <- tibble()
+  for (b in weeks){
+    block.file <-file.path(data.folder.prepared, paste0(sprintf("%02d",b),"-",data.rds.file))
+    print(paste("Reading data block",block.file))
+    block <- readRDS(block.file)
+    cols <- intersect(colnames(block),series)
+    block <- block%>%select(datetime,cols)
+    dat<-bind_rows(dat,block)
+  }
+  dat <- dat%>%mutate(dow=weekdays(datetime))%>%
+    mutate(dow_time=paste(dow,format(datetime, "%H:%M")))%>%
+    AggregateData(ta*2)
+  ser<-colnames(dat%>%select(-datetime))
+  
+  nhist <- 30*7*24*60/ta
+  historical.until <- dat[nhist,]$datetime
+  
+  
+  outlier.alpha <- 0.05
+  dat.historical <- dat%>%filter(datetime<=historical.until)%>%
+    DropOrImpute(imputeLimit=impute.limit)
+  ser<-colnames(dat.historical%>%select(-datetime))
+  dat.historical <- dat.historical%>%gather(ser,key='node', value='value')%>%
+    mutate(dow=weekdays(datetime))%>%
+    mutate(dow_time=paste(dow,format(datetime, "%H:%M")))%>%
+    group_by(node, dow_time) %>% summarise(s_m=median(value,na.rm = T),
+              s_lb=quantile(value, 0.25, na.rm = T) - (0.15/outlier.alpha)*
+                iqr(value, na.rm = T),
+              s_ub=quantile(value, 0.75, na.rm = T) + (0.15/outlier.alpha)*
+                iqr(value, na.rm = T))
+  ser<-dat.historical%>%select(node)%>%pull
+  
+  #summary(dat.historical%>%select(dow_time,node,s_m)%>%spread(key = node, value = s_m))
+  #ggplot(dat.historical, aes(x = dow_time, y = s_m, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
+  
+  dat.training <- dat%>%filter(datetime>historical.until)%>%
+    DropOrImpute(imputeLimit=impute.limit)
+  series <- colnames(dat.training%>%select(-datetime))
+  dat.training <- dat.training%>%gather(series,key='node', value='value')
+  series<-dat.training%>%group_by(node)%>%
+    summarise(sd=sd(value))%>%filter(sd>0.1)%>%select(node)%>%pull
+  res<-gsub(paste0(".volume"),"",series)
+  dat.training <- dat.training%>%filter(node %in% series)%>%
+    mutate(dow=weekdays(datetime))%>%
+    mutate(dow_time=paste(dow,format(datetime, "%H:%M")))
+  
+  
+  dat.training<-dat.training %>% left_join(dat.historical, by=c("node"="node", "dow_time"="dow_time"))
+  print(paste("Upper outliers", dat.training%>%filter(value>s_ub, s_ub>0)%>%nrow))
+  print(paste("Lower outliers", dat.training%>%filter(value<s_lb)%>%nrow))
+  
+  #ggplot(dat.training, aes(x = datetime, y = value, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
+  
+  dat.training <- dat.training%>%
+    mutate(prepared=(ifelse(value<s_lb,s_lb,ifelse(value>s_ub, s_ub,value))-s_m))%>%
+    select(datetime,node,prepared)
+    
+  series <- dat.training%>%group_by(node)%>%
+    summarise(sd=sd(value))%>%filter(sd>0.1)%>%select(node)%>%pull
+  dat.training <-dat.training%>%filter(node %in% series)
+  
+  #ggplot(dat.training, aes(x = prepared, col=node, group=node)) + geom_histogram()+facet_wrap( ~ node)
+  #ggplot(dat.training, aes(x = datetime, y = prepared, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
+  
+  mysample <-list(data=dat.training%>%spread(key = node, value = prepared),
+                  shortest.distances=shortest.distances[res,res])
+  
   saveRDS(mysample,sample.rds)
 }else{
   print("Sample exists - using saved")
@@ -63,6 +133,12 @@ if (!file.exists(sample.rds)){
 
 ```{r model}
 series <- colnames(mysample$data)[-1]
+print(paste("Number of series", length(series)))
+
+mysample$data%>%gather(series,key='node', value='value')%>%group_by(node)%>%
+    summarise(sd=sd(value))%>%filter(sd>0.1)%>%select(node)%>%pull
+
+
 trainingMinutes <- seq(480,480, by=120)
 validationSize <- 7*24*60/ta
 validationEnd <- nrow(mysample$data)
@@ -80,8 +156,8 @@ forecastingSteps<-3 #12/ta
 
 
  results<-tibble()
-# trainingSize <- trainingMinutes[1]/ta
-# dat.restricted<-mysample$data[(validationStart-trainingSize+1):validationEnd,]
+trainingSize <- trainingMinutes[1]/ta
+dat.restricted<-mysample$data[(validationStart-trainingSize+1):validationEnd,]
 base_params<-list(data=dat.restricted,
                     seriesNames=series,
                     forecastingSteps=forecastingSteps,
@@ -93,11 +169,7 @@ base_params<-list(data=dat.restricted,
                 c(params,list(xModel=xModel.naive)),
                 envir=environment())
    results<-add_results(results,res1,"naive",trainingSize,ta,forecastingSteps)
-# 
 
-source(file.path("R","cv_functions.R"))
-  
-source(file.path("R","models.R"))
 #results2<-tibble()
   res<-do.call(rollingWindow,
                c(params,list(xModel=xModel.naive,clusterNumber=1)),

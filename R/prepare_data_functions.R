@@ -319,22 +319,41 @@ DropOrImpute <- function(tib, imputeLimit=0.05,verbose=F){
 }
 
 
-LoadMassiveData <-function(csv_path, start_date, number_of_days, block_size=4*7){
+LoadMassiveData <-function(csv_path, start_date, number_of_days, block_size=4*7,
+                           save_block=F, save_folder="", save_name=""){
   tib <- tibble()
   rem <- number_of_days
   read_from <- start_date
+  b<-1
   while(rem>0){
-    read_block <- ifelse(rem>block_size,block_size,rem)
-    sread_from <- format(read_from, format="%Y%m%d",tz="GMT")
-    print(paste("Reading date for",read_block,"days, starting from",sread_from))
-    tib2 <-load_csv_data(csv_path, sread_from, read_block, verbose=T)
-    tib<-bind_rows(tib,tib2)
-    rm(tib2)
-    gc()
-    rem<-rem-read_block
-    read_from <- read_from+read_block
+      read_block <- ifelse(rem>block_size,block_size,rem)
+      sread_from <- format(read_from, format="%Y%m%d",tz="GMT")
+      tib2<-tibble()
+      block.file <-file.path(save_folder, paste0(sprintf("%02d",b),"-",save_name))
+      if (file.exists(block.file)){
+        print(paste("Block already exists",b))
+        if (!save_block) tib2 <- readRDS(block.file)
+      }else{
+        print(paste("Reading date for",read_block,"days, starting from",sread_from))
+        tib2 <-load_csv_data(csv_path, sread_from, read_block, verbose=T)
+        if (save_block) {
+          saveRDS(tib2, block.file)
+        }
+      }
+      if (!save_block){
+        tib<-bind_rows(tib,tib2)
+      }
+      rm(tib2)
+      gc()
+      b <- b+1
+      rem<-rem-read_block
+      read_from <- read_from+read_block
   }
-  return (tib)
+  if (save_block){
+    return(b-1)
+  }else{
+    return(tib)
+  }
 }
 
 
@@ -384,17 +403,4 @@ CalculateShortestDistances <-function(config.nodes){
   allnodes<-as.vector(config.nodes%>%distinct(node_name)%>%pull)
   shA<-prepare_shortest_distances(allnodes,all.links,useTime=T)
   return(shA)
-}
-
-GetSample <- function(central.node,shortest.distances,max.distance.time, data, var, frequency=7){
-  res<- GetNetwork(central.node,shortest.distances,max.distance.time)
-  series<-paste0(names(res),".",var)
-  dat <- data%>%filter(node %in% series)
-  series<-dat%>%distinct(node)%>%unlist
-  dat <- filterAnomalies(dat,frequency=frequency*24*60/ta)
-  series<-dat%>%group_by(node)%>%summarise(sd=sd(prepared))%>%filter(sd>0.1)%>%select(node)%>%pull
-  res<-gsub(paste0(".",var),"",series)
-  dat <- dat%>%filter(node %in% series)%>%spread(key = node, value = prepared)
-  
-  return(list(data=dat, shortest.distances=shortest.distances[res,res]))
 }

@@ -152,10 +152,10 @@ dir.create(config.folder, showWarnings = FALSE)
 download.website &lt;- &quot;http://www.d.umn.edu/tdrl/traffic/&quot;
 
 # Setup the first date for downloading
-download.start.date &lt;- as.Date(&quot;20180701&quot;, format=&quot;%Y%m%d&quot;)
+download.start.date &lt;- as.Date(&quot;20170101&quot;, format=&quot;%Y%m%d&quot;)
 
 # Setup number of days for downloading
-download.days &lt;- 7*10
+download.days &lt;- 7*52
 
 # Define remote file names
 download.files &lt;- paste0(format(seq(download.start.date, by = &quot;day&quot;, length.out = download.days),
@@ -167,14 +167,17 @@ config.filename.gz &lt;- paste0(config.filename,&quot;.gz&quot;)
 config.url&lt;-paste0(&quot;http://data.dot.state.mn.us/iris_xml/&quot;,config.filename.gz)
 config.file.gz &lt;- file.path(config.folder, config.filename.gz)
 config.file &lt;- file.path(config.folder, config.filename)
+
+# Define local file names
 config.rds &lt;- file.path(data.folder.prepared, &quot;config.rds&quot;)
-data.rds &lt;- file.path(data.folder.prepared,&quot;working-raw.rds&quot;)
+data.rds.file &lt;- &quot;working-raw.rds&quot;
+block.size &lt;- 7 # save 1 week per block
 
 impute.limit &lt;- 0.2</code></pre>
 <div id="load-necessary-libraries" class="section level2">
 <h2>Load necessary libraries</h2>
-<pre class="r"><code>memory.limit(size=1024*128)</code></pre>
-<pre><code>[1] 131072</code></pre>
+<pre class="r"><code>memory.limit(size=1024*1024)</code></pre>
+<pre><code>[1] 1048576</code></pre>
 <pre class="r"><code>library(needs)</code></pre>
 <pre><code>Warning: package 'needs' was built under R version 3.4.4</code></pre>
 <pre class="r"><code>needs(tidyverse)
@@ -193,194 +196,529 @@ source(file.path(&quot;R&quot;,&quot;prepare_data_functions.R&quot;))</code></pr
 <pre class="r"><code>config.tibble &lt;- readRDS(config.rds)</code></pre>
 <pre class="r"><code>TransformToCSV(config.tibble %&gt;% filter(!is.na(detector_name)), 
                data.folder.downloaded,data.folder.tmp, verbose = T)</code></pre>
-<pre><code>[1] &quot;CSV file exists. Skipping 20180701&quot;
-[1] &quot;CSV file exists. Skipping 20180702&quot;
-[1] &quot;CSV file exists. Skipping 20180703&quot;
-[1] &quot;CSV file exists. Skipping 20180704&quot;
-[1] &quot;CSV file exists. Skipping 20180705&quot;
-[1] &quot;CSV file exists. Skipping 20180706&quot;
-[1] &quot;CSV file exists. Skipping 20180707&quot;
-[1] &quot;CSV file exists. Skipping 20180708&quot;
-[1] &quot;CSV file exists. Skipping 20180709&quot;
-[1] &quot;CSV file exists. Skipping 20180710&quot;
-[1] &quot;CSV file exists. Skipping 20180711&quot;
-[1] &quot;CSV file exists. Skipping 20180712&quot;
-[1] &quot;CSV file exists. Skipping 20180713&quot;
-[1] &quot;CSV file exists. Skipping 20180714&quot;
-[1] &quot;CSV file exists. Skipping 20180715&quot;
-[1] &quot;CSV file exists. Skipping 20180716&quot;
-[1] &quot;CSV file exists. Skipping 20180717&quot;
-[1] &quot;CSV file exists. Skipping 20180718&quot;
-[1] &quot;CSV file exists. Skipping 20180719&quot;
-[1] &quot;CSV file exists. Skipping 20180720&quot;
-[1] &quot;CSV file exists. Skipping 20180721&quot;
-[1] &quot;CSV file exists. Skipping 20180722&quot;
-[1] &quot;CSV file exists. Skipping 20180723&quot;
-[1] &quot;CSV file exists. Skipping 20180724&quot;
-[1] &quot;CSV file exists. Skipping 20180725&quot;
-[1] &quot;CSV file exists. Skipping 20180726&quot;
-[1] &quot;CSV file exists. Skipping 20180727&quot;
-[1] &quot;CSV file exists. Skipping 20180728&quot;
-[1] &quot;CSV file exists. Skipping 20180729&quot;
-[1] &quot;CSV file exists. Skipping 20180730&quot;
-[1] &quot;CSV file exists. Skipping 20180731&quot;
-[1] &quot;CSV file exists. Skipping 20180801&quot;
-[1] &quot;CSV file exists. Skipping 20180802&quot;
-[1] &quot;CSV file exists. Skipping 20180803&quot;
-[1] &quot;CSV file exists. Skipping 20180804&quot;
-[1] &quot;CSV file exists. Skipping 20180805&quot;
-[1] &quot;CSV file exists. Skipping 20180806&quot;
-[1] &quot;CSV file exists. Skipping 20180807&quot;
-[1] &quot;CSV file exists. Skipping 20180808&quot;
-[1] &quot;CSV file exists. Skipping 20180809&quot;
-[1] &quot;CSV file exists. Skipping 20180810&quot;
-[1] &quot;CSV file exists. Skipping 20180811&quot;
-[1] &quot;CSV file exists. Skipping 20180812&quot;
-[1] &quot;CSV file exists. Skipping 20180813&quot;
-[1] &quot;CSV file exists. Skipping 20180814&quot;
-[1] &quot;CSV file exists. Skipping 20180815&quot;
-[1] &quot;CSV file exists. Skipping 20180816&quot;
-[1] &quot;CSV file exists. Skipping 20180817&quot;
-[1] &quot;CSV file exists. Skipping 20180818&quot;
-[1] &quot;CSV file exists. Skipping 20180819&quot;
-[1] &quot;CSV file exists. Skipping 20180820&quot;
-[1] &quot;CSV file exists. Skipping 20180821&quot;
-[1] &quot;CSV file exists. Skipping 20180822&quot;
-[1] &quot;CSV file exists. Skipping 20180823&quot;
-[1] &quot;CSV file exists. Skipping 20180824&quot;
-[1] &quot;CSV file exists. Skipping 20180825&quot;
-[1] &quot;CSV file exists. Skipping 20180826&quot;
-[1] &quot;CSV file exists. Skipping 20180827&quot;
-[1] &quot;CSV file exists. Skipping 20180828&quot;
-[1] &quot;CSV file exists. Skipping 20180829&quot;
-[1] &quot;CSV file exists. Skipping 20180830&quot;
-[1] &quot;CSV file exists. Skipping 20180831&quot;
-[1] &quot;CSV file exists. Skipping 20180901&quot;
-[1] &quot;CSV file exists. Skipping 20180902&quot;
-[1] &quot;CSV file exists. Skipping 20180903&quot;
-[1] &quot;CSV file exists. Skipping 20180904&quot;
-[1] &quot;CSV file exists. Skipping 20180905&quot;
-[1] &quot;CSV file exists. Skipping 20180906&quot;
-[1] &quot;CSV file exists. Skipping 20180907&quot;
-[1] &quot;CSV file exists. Skipping 20180908&quot;</code></pre>
+<pre><code>[1] &quot;CSV file exists. Skipping 20170101&quot;
+[1] &quot;CSV file exists. Skipping 20170102&quot;
+[1] &quot;CSV file exists. Skipping 20170103&quot;
+[1] &quot;CSV file exists. Skipping 20170104&quot;
+[1] &quot;CSV file exists. Skipping 20170105&quot;
+[1] &quot;CSV file exists. Skipping 20170106&quot;
+[1] &quot;CSV file exists. Skipping 20170107&quot;
+[1] &quot;CSV file exists. Skipping 20170108&quot;
+[1] &quot;CSV file exists. Skipping 20170109&quot;
+[1] &quot;CSV file exists. Skipping 20170110&quot;
+[1] &quot;CSV file exists. Skipping 20170111&quot;
+[1] &quot;CSV file exists. Skipping 20170112&quot;
+[1] &quot;CSV file exists. Skipping 20170113&quot;
+[1] &quot;CSV file exists. Skipping 20170114&quot;
+[1] &quot;CSV file exists. Skipping 20170115&quot;
+[1] &quot;CSV file exists. Skipping 20170116&quot;
+[1] &quot;CSV file exists. Skipping 20170117&quot;
+[1] &quot;CSV file exists. Skipping 20170118&quot;
+[1] &quot;CSV file exists. Skipping 20170119&quot;
+[1] &quot;CSV file exists. Skipping 20170120&quot;
+[1] &quot;CSV file exists. Skipping 20170121&quot;
+[1] &quot;CSV file exists. Skipping 20170122&quot;
+[1] &quot;CSV file exists. Skipping 20170123&quot;
+[1] &quot;CSV file exists. Skipping 20170124&quot;
+[1] &quot;CSV file exists. Skipping 20170125&quot;
+[1] &quot;CSV file exists. Skipping 20170126&quot;
+[1] &quot;CSV file exists. Skipping 20170127&quot;
+[1] &quot;CSV file exists. Skipping 20170128&quot;
+[1] &quot;CSV file exists. Skipping 20170129&quot;
+[1] &quot;CSV file exists. Skipping 20170130&quot;
+[1] &quot;CSV file exists. Skipping 20170131&quot;
+[1] &quot;CSV file exists. Skipping 20170201&quot;
+[1] &quot;CSV file exists. Skipping 20170202&quot;
+[1] &quot;CSV file exists. Skipping 20170203&quot;
+[1] &quot;CSV file exists. Skipping 20170204&quot;
+[1] &quot;CSV file exists. Skipping 20170205&quot;
+[1] &quot;CSV file exists. Skipping 20170206&quot;
+[1] &quot;CSV file exists. Skipping 20170207&quot;
+[1] &quot;CSV file exists. Skipping 20170208&quot;
+[1] &quot;CSV file exists. Skipping 20170209&quot;
+[1] &quot;CSV file exists. Skipping 20170210&quot;
+[1] &quot;CSV file exists. Skipping 20170211&quot;
+[1] &quot;CSV file exists. Skipping 20170212&quot;
+[1] &quot;CSV file exists. Skipping 20170213&quot;
+[1] &quot;CSV file exists. Skipping 20170214&quot;
+[1] &quot;CSV file exists. Skipping 20170215&quot;
+[1] &quot;CSV file exists. Skipping 20170216&quot;
+[1] &quot;CSV file exists. Skipping 20170217&quot;
+[1] &quot;CSV file exists. Skipping 20170218&quot;
+[1] &quot;CSV file exists. Skipping 20170219&quot;
+[1] &quot;CSV file exists. Skipping 20170220&quot;
+[1] &quot;CSV file exists. Skipping 20170221&quot;
+[1] &quot;CSV file exists. Skipping 20170222&quot;
+[1] &quot;CSV file exists. Skipping 20170223&quot;
+[1] &quot;CSV file exists. Skipping 20170224&quot;
+[1] &quot;CSV file exists. Skipping 20170225&quot;
+[1] &quot;CSV file exists. Skipping 20170226&quot;
+[1] &quot;CSV file exists. Skipping 20170227&quot;
+[1] &quot;CSV file exists. Skipping 20170228&quot;
+[1] &quot;CSV file exists. Skipping 20170301&quot;
+[1] &quot;CSV file exists. Skipping 20170302&quot;
+[1] &quot;CSV file exists. Skipping 20170303&quot;
+[1] &quot;CSV file exists. Skipping 20170304&quot;
+[1] &quot;CSV file exists. Skipping 20170305&quot;
+[1] &quot;CSV file exists. Skipping 20170306&quot;
+[1] &quot;CSV file exists. Skipping 20170307&quot;
+[1] &quot;CSV file exists. Skipping 20170308&quot;
+[1] &quot;CSV file exists. Skipping 20170309&quot;
+[1] &quot;CSV file exists. Skipping 20170310&quot;
+[1] &quot;CSV file exists. Skipping 20170311&quot;
+[1] &quot;CSV file exists. Skipping 20170312&quot;
+[1] &quot;CSV file exists. Skipping 20170313&quot;
+[1] &quot;CSV file exists. Skipping 20170314&quot;
+[1] &quot;CSV file exists. Skipping 20170315&quot;
+[1] &quot;CSV file exists. Skipping 20170316&quot;
+[1] &quot;CSV file exists. Skipping 20170317&quot;
+[1] &quot;CSV file exists. Skipping 20170318&quot;
+[1] &quot;CSV file exists. Skipping 20170319&quot;
+[1] &quot;CSV file exists. Skipping 20170320&quot;
+[1] &quot;CSV file exists. Skipping 20170321&quot;
+[1] &quot;CSV file exists. Skipping 20170322&quot;
+[1] &quot;CSV file exists. Skipping 20170323&quot;
+[1] &quot;CSV file exists. Skipping 20170324&quot;
+[1] &quot;CSV file exists. Skipping 20170325&quot;
+[1] &quot;CSV file exists. Skipping 20170326&quot;
+[1] &quot;CSV file exists. Skipping 20170327&quot;
+[1] &quot;CSV file exists. Skipping 20170328&quot;
+[1] &quot;CSV file exists. Skipping 20170329&quot;
+[1] &quot;CSV file exists. Skipping 20170330&quot;
+[1] &quot;CSV file exists. Skipping 20170331&quot;
+[1] &quot;CSV file exists. Skipping 20170401&quot;
+[1] &quot;CSV file exists. Skipping 20170402&quot;
+[1] &quot;CSV file exists. Skipping 20170403&quot;
+[1] &quot;CSV file exists. Skipping 20170404&quot;
+[1] &quot;CSV file exists. Skipping 20170405&quot;
+[1] &quot;CSV file exists. Skipping 20170406&quot;
+[1] &quot;CSV file exists. Skipping 20170407&quot;
+[1] &quot;CSV file exists. Skipping 20170408&quot;
+[1] &quot;CSV file exists. Skipping 20170409&quot;
+[1] &quot;CSV file exists. Skipping 20170410&quot;
+[1] &quot;CSV file exists. Skipping 20170411&quot;
+[1] &quot;CSV file exists. Skipping 20170412&quot;
+[1] &quot;CSV file exists. Skipping 20170413&quot;
+[1] &quot;CSV file exists. Skipping 20170414&quot;
+[1] &quot;CSV file exists. Skipping 20170415&quot;
+[1] &quot;CSV file exists. Skipping 20170416&quot;
+[1] &quot;CSV file exists. Skipping 20170417&quot;
+[1] &quot;CSV file exists. Skipping 20170418&quot;
+[1] &quot;CSV file exists. Skipping 20170419&quot;
+[1] &quot;CSV file exists. Skipping 20170420&quot;
+[1] &quot;CSV file exists. Skipping 20170421&quot;
+[1] &quot;CSV file exists. Skipping 20170422&quot;
+[1] &quot;CSV file exists. Skipping 20170423&quot;
+[1] &quot;CSV file exists. Skipping 20170424&quot;
+[1] &quot;CSV file exists. Skipping 20170425&quot;
+[1] &quot;CSV file exists. Skipping 20170426&quot;
+[1] &quot;CSV file exists. Skipping 20170427&quot;
+[1] &quot;CSV file exists. Skipping 20170428&quot;
+[1] &quot;CSV file exists. Skipping 20170429&quot;
+[1] &quot;CSV file exists. Skipping 20170430&quot;
+[1] &quot;CSV file exists. Skipping 20170501&quot;
+[1] &quot;CSV file exists. Skipping 20170502&quot;
+[1] &quot;CSV file exists. Skipping 20170503&quot;
+[1] &quot;CSV file exists. Skipping 20170504&quot;
+[1] &quot;CSV file exists. Skipping 20170505&quot;
+[1] &quot;CSV file exists. Skipping 20170506&quot;
+[1] &quot;CSV file exists. Skipping 20170507&quot;
+[1] &quot;CSV file exists. Skipping 20170508&quot;
+[1] &quot;CSV file exists. Skipping 20170509&quot;
+[1] &quot;CSV file exists. Skipping 20170510&quot;
+[1] &quot;CSV file exists. Skipping 20170511&quot;
+[1] &quot;CSV file exists. Skipping 20170512&quot;
+[1] &quot;CSV file exists. Skipping 20170513&quot;
+[1] &quot;CSV file exists. Skipping 20170514&quot;
+[1] &quot;CSV file exists. Skipping 20170515&quot;
+[1] &quot;CSV file exists. Skipping 20170516&quot;
+[1] &quot;CSV file exists. Skipping 20170517&quot;
+[1] &quot;CSV file exists. Skipping 20170518&quot;
+[1] &quot;CSV file exists. Skipping 20170519&quot;
+[1] &quot;CSV file exists. Skipping 20170520&quot;
+[1] &quot;CSV file exists. Skipping 20170521&quot;
+[1] &quot;CSV file exists. Skipping 20170522&quot;
+[1] &quot;CSV file exists. Skipping 20170523&quot;
+[1] &quot;CSV file exists. Skipping 20170524&quot;
+[1] &quot;CSV file exists. Skipping 20170525&quot;
+[1] &quot;CSV file exists. Skipping 20170526&quot;
+[1] &quot;CSV file exists. Skipping 20170527&quot;
+[1] &quot;CSV file exists. Skipping 20170528&quot;
+[1] &quot;CSV file exists. Skipping 20170529&quot;
+[1] &quot;CSV file exists. Skipping 20170530&quot;
+[1] &quot;CSV file exists. Skipping 20170531&quot;
+[1] &quot;CSV file exists. Skipping 20170601&quot;
+[1] &quot;CSV file exists. Skipping 20170602&quot;
+[1] &quot;CSV file exists. Skipping 20170603&quot;
+[1] &quot;CSV file exists. Skipping 20170604&quot;
+[1] &quot;CSV file exists. Skipping 20170605&quot;
+[1] &quot;CSV file exists. Skipping 20170606&quot;
+[1] &quot;CSV file exists. Skipping 20170607&quot;
+[1] &quot;CSV file exists. Skipping 20170608&quot;
+[1] &quot;CSV file exists. Skipping 20170609&quot;
+[1] &quot;CSV file exists. Skipping 20170610&quot;
+[1] &quot;CSV file exists. Skipping 20170611&quot;
+[1] &quot;CSV file exists. Skipping 20170612&quot;
+[1] &quot;CSV file exists. Skipping 20170613&quot;
+[1] &quot;CSV file exists. Skipping 20170614&quot;
+[1] &quot;CSV file exists. Skipping 20170615&quot;
+[1] &quot;CSV file exists. Skipping 20170616&quot;
+[1] &quot;CSV file exists. Skipping 20170617&quot;
+[1] &quot;CSV file exists. Skipping 20170618&quot;
+[1] &quot;CSV file exists. Skipping 20170619&quot;
+[1] &quot;CSV file exists. Skipping 20170620&quot;
+[1] &quot;CSV file exists. Skipping 20170621&quot;
+[1] &quot;CSV file exists. Skipping 20170622&quot;
+[1] &quot;CSV file exists. Skipping 20170623&quot;
+[1] &quot;CSV file exists. Skipping 20170624&quot;
+[1] &quot;CSV file exists. Skipping 20170625&quot;
+[1] &quot;CSV file exists. Skipping 20170626&quot;
+[1] &quot;CSV file exists. Skipping 20170627&quot;
+[1] &quot;CSV file exists. Skipping 20170628&quot;
+[1] &quot;CSV file exists. Skipping 20170629&quot;
+[1] &quot;CSV file exists. Skipping 20170630&quot;
+[1] &quot;CSV file exists. Skipping 20170701&quot;
+[1] &quot;CSV file exists. Skipping 20170702&quot;
+[1] &quot;CSV file exists. Skipping 20170703&quot;
+[1] &quot;CSV file exists. Skipping 20170704&quot;
+[1] &quot;CSV file exists. Skipping 20170705&quot;
+[1] &quot;CSV file exists. Skipping 20170706&quot;
+[1] &quot;CSV file exists. Skipping 20170707&quot;
+[1] &quot;CSV file exists. Skipping 20170708&quot;
+[1] &quot;CSV file exists. Skipping 20170709&quot;
+[1] &quot;CSV file exists. Skipping 20170710&quot;
+[1] &quot;CSV file exists. Skipping 20170711&quot;
+[1] &quot;CSV file exists. Skipping 20170712&quot;
+[1] &quot;CSV file exists. Skipping 20170713&quot;
+[1] &quot;CSV file exists. Skipping 20170714&quot;
+[1] &quot;CSV file exists. Skipping 20170715&quot;
+[1] &quot;CSV file exists. Skipping 20170716&quot;
+[1] &quot;CSV file exists. Skipping 20170717&quot;
+[1] &quot;CSV file exists. Skipping 20170718&quot;
+[1] &quot;CSV file exists. Skipping 20170719&quot;
+[1] &quot;CSV file exists. Skipping 20170720&quot;
+[1] &quot;CSV file exists. Skipping 20170721&quot;
+[1] &quot;CSV file exists. Skipping 20170722&quot;
+[1] &quot;CSV file exists. Skipping 20170723&quot;
+[1] &quot;CSV file exists. Skipping 20170724&quot;
+[1] &quot;CSV file exists. Skipping 20170725&quot;
+[1] &quot;CSV file exists. Skipping 20170726&quot;
+[1] &quot;CSV file exists. Skipping 20170727&quot;
+[1] &quot;CSV file exists. Skipping 20170728&quot;
+[1] &quot;CSV file exists. Skipping 20170729&quot;
+[1] &quot;CSV file exists. Skipping 20170730&quot;
+[1] &quot;CSV file exists. Skipping 20170731&quot;
+[1] &quot;CSV file exists. Skipping 20170801&quot;
+[1] &quot;CSV file exists. Skipping 20170802&quot;
+[1] &quot;CSV file exists. Skipping 20170803&quot;
+[1] &quot;CSV file exists. Skipping 20170804&quot;
+[1] &quot;CSV file exists. Skipping 20170805&quot;
+[1] &quot;CSV file exists. Skipping 20170806&quot;
+[1] &quot;CSV file exists. Skipping 20170807&quot;
+[1] &quot;CSV file exists. Skipping 20170808&quot;
+[1] &quot;CSV file exists. Skipping 20170809&quot;
+[1] &quot;CSV file exists. Skipping 20170810&quot;
+[1] &quot;CSV file exists. Skipping 20170811&quot;
+[1] &quot;CSV file exists. Skipping 20170812&quot;
+[1] &quot;CSV file exists. Skipping 20170813&quot;
+[1] &quot;CSV file exists. Skipping 20170814&quot;
+[1] &quot;CSV file exists. Skipping 20170815&quot;
+[1] &quot;CSV file exists. Skipping 20170816&quot;
+[1] &quot;CSV file exists. Skipping 20170817&quot;
+[1] &quot;CSV file exists. Skipping 20170818&quot;
+[1] &quot;CSV file exists. Skipping 20170819&quot;
+[1] &quot;CSV file exists. Skipping 20170820&quot;
+[1] &quot;CSV file exists. Skipping 20170821&quot;
+[1] &quot;CSV file exists. Skipping 20170822&quot;
+[1] &quot;CSV file exists. Skipping 20170823&quot;
+[1] &quot;CSV file exists. Skipping 20170824&quot;
+[1] &quot;CSV file exists. Skipping 20170825&quot;
+[1] &quot;CSV file exists. Skipping 20170826&quot;
+[1] &quot;CSV file exists. Skipping 20170827&quot;
+[1] &quot;CSV file exists. Skipping 20170828&quot;
+[1] &quot;CSV file exists. Skipping 20170829&quot;
+[1] &quot;CSV file exists. Skipping 20170830&quot;
+[1] &quot;CSV file exists. Skipping 20170831&quot;
+[1] &quot;CSV file exists. Skipping 20170901&quot;
+[1] &quot;CSV file exists. Skipping 20170902&quot;
+[1] &quot;CSV file exists. Skipping 20170903&quot;
+[1] &quot;CSV file exists. Skipping 20170904&quot;
+[1] &quot;CSV file exists. Skipping 20170905&quot;
+[1] &quot;CSV file exists. Skipping 20170906&quot;
+[1] &quot;CSV file exists. Skipping 20170907&quot;
+[1] &quot;CSV file exists. Skipping 20170908&quot;
+[1] &quot;CSV file exists. Skipping 20170909&quot;
+[1] &quot;CSV file exists. Skipping 20170910&quot;
+[1] &quot;CSV file exists. Skipping 20170911&quot;
+[1] &quot;CSV file exists. Skipping 20170912&quot;
+[1] &quot;CSV file exists. Skipping 20170913&quot;
+[1] &quot;CSV file exists. Skipping 20170914&quot;
+[1] &quot;CSV file exists. Skipping 20170915&quot;
+[1] &quot;CSV file exists. Skipping 20170916&quot;
+[1] &quot;CSV file exists. Skipping 20170917&quot;
+[1] &quot;CSV file exists. Skipping 20170918&quot;
+[1] &quot;CSV file exists. Skipping 20170919&quot;
+[1] &quot;CSV file exists. Skipping 20170920&quot;
+[1] &quot;CSV file exists. Skipping 20170921&quot;
+[1] &quot;CSV file exists. Skipping 20170922&quot;
+[1] &quot;CSV file exists. Skipping 20170923&quot;
+[1] &quot;CSV file exists. Skipping 20170924&quot;
+[1] &quot;CSV file exists. Skipping 20170925&quot;
+[1] &quot;CSV file exists. Skipping 20170926&quot;
+[1] &quot;CSV file exists. Skipping 20170927&quot;
+[1] &quot;CSV file exists. Skipping 20170928&quot;
+[1] &quot;CSV file exists. Skipping 20170929&quot;
+[1] &quot;CSV file exists. Skipping 20170930&quot;
+[1] &quot;CSV file exists. Skipping 20171001&quot;
+[1] &quot;CSV file exists. Skipping 20171002&quot;
+[1] &quot;CSV file exists. Skipping 20171003&quot;
+[1] &quot;CSV file exists. Skipping 20171004&quot;
+[1] &quot;CSV file exists. Skipping 20171005&quot;
+[1] &quot;CSV file exists. Skipping 20171006&quot;
+[1] &quot;CSV file exists. Skipping 20171007&quot;
+[1] &quot;CSV file exists. Skipping 20171008&quot;
+[1] &quot;CSV file exists. Skipping 20171009&quot;
+[1] &quot;CSV file exists. Skipping 20171010&quot;
+[1] &quot;CSV file exists. Skipping 20171011&quot;
+[1] &quot;CSV file exists. Skipping 20171012&quot;
+[1] &quot;CSV file exists. Skipping 20171013&quot;
+[1] &quot;CSV file exists. Skipping 20171014&quot;
+[1] &quot;CSV file exists. Skipping 20171015&quot;
+[1] &quot;CSV file exists. Skipping 20171016&quot;
+[1] &quot;CSV file exists. Skipping 20171017&quot;
+[1] &quot;CSV file exists. Skipping 20171018&quot;
+[1] &quot;CSV file exists. Skipping 20171019&quot;
+[1] &quot;CSV file exists. Skipping 20171020&quot;
+[1] &quot;CSV file exists. Skipping 20171021&quot;
+[1] &quot;CSV file exists. Skipping 20171022&quot;
+[1] &quot;CSV file exists. Skipping 20171023&quot;
+[1] &quot;CSV file exists. Skipping 20171024&quot;
+[1] &quot;CSV file exists. Skipping 20171025&quot;
+[1] &quot;CSV file exists. Skipping 20171026&quot;
+[1] &quot;CSV file exists. Skipping 20171027&quot;
+[1] &quot;CSV file exists. Skipping 20171028&quot;
+[1] &quot;CSV file exists. Skipping 20171029&quot;
+[1] &quot;CSV file exists. Skipping 20171030&quot;
+[1] &quot;CSV file exists. Skipping 20171031&quot;
+[1] &quot;CSV file exists. Skipping 20171101&quot;
+[1] &quot;CSV file exists. Skipping 20171102&quot;
+[1] &quot;CSV file exists. Skipping 20171103&quot;
+[1] &quot;CSV file exists. Skipping 20171104&quot;
+[1] &quot;CSV file exists. Skipping 20171105&quot;
+[1] &quot;CSV file exists. Skipping 20171106&quot;
+[1] &quot;CSV file exists. Skipping 20171107&quot;
+[1] &quot;CSV file exists. Skipping 20171108&quot;
+[1] &quot;CSV file exists. Skipping 20171109&quot;
+[1] &quot;CSV file exists. Skipping 20171110&quot;
+[1] &quot;CSV file exists. Skipping 20171111&quot;
+[1] &quot;CSV file exists. Skipping 20171112&quot;
+[1] &quot;CSV file exists. Skipping 20171113&quot;
+[1] &quot;CSV file exists. Skipping 20171114&quot;
+[1] &quot;CSV file exists. Skipping 20171115&quot;
+[1] &quot;CSV file exists. Skipping 20171116&quot;
+[1] &quot;CSV file exists. Skipping 20171117&quot;
+[1] &quot;CSV file exists. Skipping 20171118&quot;
+[1] &quot;CSV file exists. Skipping 20171119&quot;
+[1] &quot;CSV file exists. Skipping 20171120&quot;
+[1] &quot;CSV file exists. Skipping 20171121&quot;
+[1] &quot;CSV file exists. Skipping 20171122&quot;
+[1] &quot;CSV file exists. Skipping 20171123&quot;
+[1] &quot;CSV file exists. Skipping 20171124&quot;
+[1] &quot;CSV file exists. Skipping 20171125&quot;
+[1] &quot;CSV file exists. Skipping 20171126&quot;
+[1] &quot;CSV file exists. Skipping 20171127&quot;
+[1] &quot;CSV file exists. Skipping 20171128&quot;
+[1] &quot;CSV file exists. Skipping 20171129&quot;
+[1] &quot;CSV file exists. Skipping 20171130&quot;
+[1] &quot;CSV file exists. Skipping 20171201&quot;
+[1] &quot;CSV file exists. Skipping 20171202&quot;
+[1] &quot;CSV file exists. Skipping 20171203&quot;
+[1] &quot;CSV file exists. Skipping 20171204&quot;
+[1] &quot;CSV file exists. Skipping 20171205&quot;
+[1] &quot;CSV file exists. Skipping 20171206&quot;
+[1] &quot;CSV file exists. Skipping 20171207&quot;
+[1] &quot;CSV file exists. Skipping 20171208&quot;
+[1] &quot;CSV file exists. Skipping 20171209&quot;
+[1] &quot;CSV file exists. Skipping 20171210&quot;
+[1] &quot;CSV file exists. Skipping 20171211&quot;
+[1] &quot;CSV file exists. Skipping 20171212&quot;
+[1] &quot;CSV file exists. Skipping 20171213&quot;
+[1] &quot;CSV file exists. Skipping 20171214&quot;
+[1] &quot;CSV file exists. Skipping 20171215&quot;
+[1] &quot;CSV file exists. Skipping 20171216&quot;
+[1] &quot;CSV file exists. Skipping 20171217&quot;
+[1] &quot;CSV file exists. Skipping 20171218&quot;
+[1] &quot;CSV file exists. Skipping 20171219&quot;
+[1] &quot;CSV file exists. Skipping 20171220&quot;
+[1] &quot;CSV file exists. Skipping 20171221&quot;
+[1] &quot;CSV file exists. Skipping 20171222&quot;
+[1] &quot;CSV file exists. Skipping 20171223&quot;
+[1] &quot;CSV file exists. Skipping 20171224&quot;
+[1] &quot;CSV file exists. Skipping 20171225&quot;
+[1] &quot;CSV file exists. Skipping 20171226&quot;
+[1] &quot;CSV file exists. Skipping 20171227&quot;
+[1] &quot;CSV file exists. Skipping 20171228&quot;
+[1] &quot;CSV file exists. Skipping 20171229&quot;
+[1] &quot;CSV file exists. Skipping 20171230&quot;
+[1] &quot;CSV file exists. Skipping 20171231&quot;</code></pre>
 <pre class="r"><code># Prepare working datasets
-
-if (!file.exists(data.rds)){
-LoadMassiveData(data.folder.tmp, download.start.date, number_of_days=download.days, block_size=1*7)%&gt;%
-  mutate(dow=weekdays(datetime))%&gt;%mutate(dow_time=paste(dow,format(datetime, &quot;%H:%M&quot;))) %&gt;%
-  saveRDS(data.rds)
-  print(&quot;RDS data file saved&quot;)
-}else{
-  print(&quot;RDS data exists - skipped&quot;)
-}</code></pre>
-<pre><code>[1] &quot;Reading date for 7 days, starting from 20180701&quot;
-[1] &quot;Reading and merging data for  2018-07-01&quot;
-[1] &quot;Reading and merging data for  2018-07-02&quot;
-[1] &quot;Reading and merging data for  2018-07-03&quot;
-[1] &quot;Reading and merging data for  2018-07-04&quot;
-[1] &quot;Reading and merging data for  2018-07-05&quot;
-[1] &quot;Reading and merging data for  2018-07-06&quot;
-[1] &quot;Reading and merging data for  2018-07-07&quot;
-[1] &quot;Reading date for 7 days, starting from 20180708&quot;
-[1] &quot;Reading and merging data for  2018-07-08&quot;
-[1] &quot;Reading and merging data for  2018-07-09&quot;
-[1] &quot;Reading and merging data for  2018-07-10&quot;
-[1] &quot;Reading and merging data for  2018-07-11&quot;
-[1] &quot;Reading and merging data for  2018-07-12&quot;
-[1] &quot;Reading and merging data for  2018-07-13&quot;
-[1] &quot;Reading and merging data for  2018-07-14&quot;
-[1] &quot;Reading date for 7 days, starting from 20180715&quot;
-[1] &quot;Reading and merging data for  2018-07-15&quot;
-[1] &quot;Reading and merging data for  2018-07-16&quot;
-[1] &quot;Reading and merging data for  2018-07-17&quot;
-[1] &quot;Reading and merging data for  2018-07-18&quot;
-[1] &quot;Reading and merging data for  2018-07-19&quot;
-[1] &quot;Reading and merging data for  2018-07-20&quot;
-[1] &quot;Reading and merging data for  2018-07-21&quot;
-[1] &quot;Reading date for 7 days, starting from 20180722&quot;
-[1] &quot;Reading and merging data for  2018-07-22&quot;
-[1] &quot;Reading and merging data for  2018-07-23&quot;
-[1] &quot;Reading and merging data for  2018-07-24&quot;
-[1] &quot;Reading and merging data for  2018-07-25&quot;
-[1] &quot;Reading and merging data for  2018-07-26&quot;
-[1] &quot;Reading and merging data for  2018-07-27&quot;
-[1] &quot;Reading and merging data for  2018-07-28&quot;
-[1] &quot;Reading date for 7 days, starting from 20180729&quot;
-[1] &quot;Reading and merging data for  2018-07-29&quot;
-[1] &quot;Reading and merging data for  2018-07-30&quot;
-[1] &quot;Reading and merging data for  2018-07-31&quot;
-[1] &quot;Reading and merging data for  2018-08-01&quot;
-[1] &quot;Reading and merging data for  2018-08-02&quot;
-[1] &quot;Reading and merging data for  2018-08-03&quot;
-[1] &quot;Reading and merging data for  2018-08-04&quot;
-[1] &quot;Reading date for 7 days, starting from 20180805&quot;
-[1] &quot;Reading and merging data for  2018-08-05&quot;
-[1] &quot;Reading and merging data for  2018-08-06&quot;
-[1] &quot;Reading and merging data for  2018-08-07&quot;
-[1] &quot;Reading and merging data for  2018-08-08&quot;
-[1] &quot;Reading and merging data for  2018-08-09&quot;
-[1] &quot;Reading and merging data for  2018-08-10&quot;
-[1] &quot;Reading and merging data for  2018-08-11&quot;
-[1] &quot;Reading date for 7 days, starting from 20180812&quot;
-[1] &quot;Reading and merging data for  2018-08-12&quot;
-[1] &quot;Reading and merging data for  2018-08-13&quot;
-[1] &quot;Reading and merging data for  2018-08-14&quot;
-[1] &quot;Reading and merging data for  2018-08-15&quot;
-[1] &quot;Reading and merging data for  2018-08-16&quot;
-[1] &quot;Reading and merging data for  2018-08-17&quot;
-[1] &quot;Reading and merging data for  2018-08-18&quot;
-[1] &quot;Reading date for 7 days, starting from 20180819&quot;
-[1] &quot;Reading and merging data for  2018-08-19&quot;
-[1] &quot;Reading and merging data for  2018-08-20&quot;
-[1] &quot;Reading and merging data for  2018-08-21&quot;
-[1] &quot;Reading and merging data for  2018-08-22&quot;
-[1] &quot;Reading and merging data for  2018-08-23&quot;
-[1] &quot;Reading and merging data for  2018-08-24&quot;
-[1] &quot;Reading and merging data for  2018-08-25&quot;
-[1] &quot;Reading date for 7 days, starting from 20180826&quot;
-[1] &quot;Reading and merging data for  2018-08-26&quot;
-[1] &quot;Reading and merging data for  2018-08-27&quot;
-[1] &quot;Reading and merging data for  2018-08-28&quot;
-[1] &quot;Reading and merging data for  2018-08-29&quot;
-[1] &quot;Reading and merging data for  2018-08-30&quot;
-[1] &quot;Reading and merging data for  2018-08-31&quot;
-[1] &quot;Reading and merging data for  2018-09-01&quot;
-[1] &quot;Reading date for 7 days, starting from 20180902&quot;
-[1] &quot;Reading and merging data for  2018-09-02&quot;
-[1] &quot;Reading and merging data for  2018-09-03&quot;
-[1] &quot;Reading and merging data for  2018-09-04&quot;
-[1] &quot;Reading and merging data for  2018-09-05&quot;
-[1] &quot;Reading and merging data for  2018-09-06&quot;
-[1] &quot;Reading and merging data for  2018-09-07&quot;
-[1] &quot;Reading and merging data for  2018-09-08&quot;</code></pre>
-<pre><code>Warning: package 'bindrcpp' was built under R version 3.4.4</code></pre>
-<pre><code>[1] &quot;RDS data file saved&quot;</code></pre>
-<pre class="r"><code>data.raw&lt;-readRDS(data.rds)
-for (ta in c(12,6,4,3,2,1)){
-  a.rds &lt;- file.path(data.folder.prepared,paste0(&quot;working-&quot;,ta,&quot;mins.rds&quot;))
-  if(!file.exists(a.rds)){
-    print(paste(&quot;Preparing data for time aggregation&quot;,ta,&quot;mins&quot;))
-    data&lt;-AggregateData(data.raw, ta*2)%&gt;%DropOrImpute(imputeLimit=impute.limit)
-    series&lt;-colnames(data%&gt;%select(-datetime))
-    data%&gt;%gather(series,key='node', value='value')%&gt;%group_by(node)%&gt;%
-    saveRDS(a.rds)
-    print(paste(&quot;Aggregated data for period&quot;,ta,&quot; saved&quot;))
-  }else{
-    print(paste(&quot;Aggregated data exists for period&quot;,ta,&quot; - skipped&quot;))
-  }
-}</code></pre>
-<pre><code>[1] &quot;Preparing data for time aggregation 12 mins&quot;
-[1] &quot;Aggregated data for period 12  saved&quot;
-[1] &quot;Preparing data for time aggregation 6 mins&quot;
-[1] &quot;Aggregated data for period 6  saved&quot;
-[1] &quot;Preparing data for time aggregation 4 mins&quot;
-[1] &quot;Aggregated data for period 4  saved&quot;
-[1] &quot;Preparing data for time aggregation 3 mins&quot;
-[1] &quot;Aggregated data for period 3  saved&quot;
-[1] &quot;Preparing data for time aggregation 2 mins&quot;
-[1] &quot;Aggregated data for period 2  saved&quot;
-[1] &quot;Preparing data for time aggregation 1 mins&quot;
-[1] &quot;Aggregated data for period 1  saved&quot;</code></pre>
+  blocks &lt;- LoadMassiveData(data.folder.tmp, download.start.date, 
+                         number_of_days=download.days, block_size=block.size, 
+                         save_block=T, save_folder=data.folder.prepared,
+                         save_name=data.rds.file)</code></pre>
+<pre><code>[1] &quot;Block already exists 1&quot;
+[1] &quot;Block already exists 2&quot;
+[1] &quot;Block already exists 3&quot;
+[1] &quot;Block already exists 4&quot;
+[1] &quot;Block already exists 5&quot;
+[1] &quot;Block already exists 6&quot;
+[1] &quot;Block already exists 7&quot;
+[1] &quot;Block already exists 8&quot;
+[1] &quot;Block already exists 9&quot;
+[1] &quot;Block already exists 10&quot;
+[1] &quot;Block already exists 11&quot;
+[1] &quot;Block already exists 12&quot;
+[1] &quot;Block already exists 13&quot;
+[1] &quot;Block already exists 14&quot;
+[1] &quot;Block already exists 15&quot;
+[1] &quot;Block already exists 16&quot;
+[1] &quot;Block already exists 17&quot;
+[1] &quot;Block already exists 18&quot;
+[1] &quot;Block already exists 19&quot;
+[1] &quot;Block already exists 20&quot;
+[1] &quot;Block already exists 21&quot;
+[1] &quot;Block already exists 22&quot;
+[1] &quot;Block already exists 23&quot;
+[1] &quot;Block already exists 24&quot;
+[1] &quot;Block already exists 25&quot;
+[1] &quot;Block already exists 26&quot;
+[1] &quot;Block already exists 27&quot;
+[1] &quot;Block already exists 28&quot;
+[1] &quot;Block already exists 29&quot;
+[1] &quot;Block already exists 30&quot;
+[1] &quot;Block already exists 31&quot;
+[1] &quot;Block already exists 32&quot;
+[1] &quot;Block already exists 33&quot;
+[1] &quot;Block already exists 34&quot;
+[1] &quot;Block already exists 35&quot;
+[1] &quot;Block already exists 36&quot;
+[1] &quot;Block already exists 37&quot;
+[1] &quot;Block already exists 38&quot;
+[1] &quot;Block already exists 39&quot;
+[1] &quot;Block already exists 40&quot;
+[1] &quot;Reading date for 7 days, starting from 20171008&quot;
+[1] &quot;Reading and merging data for  2017-10-08&quot;
+[1] &quot;Reading and merging data for  2017-10-09&quot;
+[1] &quot;Reading and merging data for  2017-10-10&quot;
+[1] &quot;Reading and merging data for  2017-10-11&quot;
+[1] &quot;Reading and merging data for  2017-10-12&quot;
+[1] &quot;Reading and merging data for  2017-10-13&quot;
+[1] &quot;Reading and merging data for  2017-10-14&quot;
+[1] &quot;Reading date for 7 days, starting from 20171015&quot;
+[1] &quot;Reading and merging data for  2017-10-15&quot;
+[1] &quot;Reading and merging data for  2017-10-16&quot;
+[1] &quot;Reading and merging data for  2017-10-17&quot;
+[1] &quot;Reading and merging data for  2017-10-18&quot;
+[1] &quot;Reading and merging data for  2017-10-19&quot;
+[1] &quot;Reading and merging data for  2017-10-20&quot;
+[1] &quot;Reading and merging data for  2017-10-21&quot;
+[1] &quot;Reading date for 7 days, starting from 20171022&quot;
+[1] &quot;Reading and merging data for  2017-10-22&quot;
+[1] &quot;Reading and merging data for  2017-10-23&quot;
+[1] &quot;Reading and merging data for  2017-10-24&quot;
+[1] &quot;Reading and merging data for  2017-10-25&quot;
+[1] &quot;Reading and merging data for  2017-10-26&quot;
+[1] &quot;Reading and merging data for  2017-10-27&quot;
+[1] &quot;Reading and merging data for  2017-10-28&quot;
+[1] &quot;Reading date for 7 days, starting from 20171029&quot;
+[1] &quot;Reading and merging data for  2017-10-29&quot;
+[1] &quot;Reading and merging data for  2017-10-30&quot;
+[1] &quot;Reading and merging data for  2017-10-31&quot;
+[1] &quot;Reading and merging data for  2017-11-01&quot;
+[1] &quot;Reading and merging data for  2017-11-02&quot;
+[1] &quot;Reading and merging data for  2017-11-03&quot;
+[1] &quot;Reading and merging data for  2017-11-04&quot;
+[1] &quot;Reading date for 7 days, starting from 20171105&quot;
+[1] &quot;Reading and merging data for  2017-11-05&quot;
+[1] &quot;Reading and merging data for  2017-11-06&quot;
+[1] &quot;Reading and merging data for  2017-11-07&quot;
+[1] &quot;Reading and merging data for  2017-11-08&quot;
+[1] &quot;Reading and merging data for  2017-11-09&quot;
+[1] &quot;Reading and merging data for  2017-11-10&quot;
+[1] &quot;Reading and merging data for  2017-11-11&quot;
+[1] &quot;Reading date for 7 days, starting from 20171112&quot;
+[1] &quot;Reading and merging data for  2017-11-12&quot;
+[1] &quot;Reading and merging data for  2017-11-13&quot;
+[1] &quot;Reading and merging data for  2017-11-14&quot;
+[1] &quot;Reading and merging data for  2017-11-15&quot;
+[1] &quot;Reading and merging data for  2017-11-16&quot;
+[1] &quot;Reading and merging data for  2017-11-17&quot;
+[1] &quot;Reading and merging data for  2017-11-18&quot;
+[1] &quot;Reading date for 7 days, starting from 20171119&quot;
+[1] &quot;Reading and merging data for  2017-11-19&quot;
+[1] &quot;Reading and merging data for  2017-11-20&quot;
+[1] &quot;Reading and merging data for  2017-11-21&quot;
+[1] &quot;Reading and merging data for  2017-11-22&quot;
+[1] &quot;Reading and merging data for  2017-11-23&quot;
+[1] &quot;Reading and merging data for  2017-11-24&quot;
+[1] &quot;Reading and merging data for  2017-11-25&quot;
+[1] &quot;Reading date for 7 days, starting from 20171126&quot;
+[1] &quot;Reading and merging data for  2017-11-26&quot;
+[1] &quot;Reading and merging data for  2017-11-27&quot;
+[1] &quot;Reading and merging data for  2017-11-28&quot;
+[1] &quot;Reading and merging data for  2017-11-29&quot;
+[1] &quot;Reading and merging data for  2017-11-30&quot;
+[1] &quot;Reading and merging data for  2017-12-01&quot;
+[1] &quot;Reading and merging data for  2017-12-02&quot;
+[1] &quot;Reading date for 7 days, starting from 20171203&quot;
+[1] &quot;Reading and merging data for  2017-12-03&quot;
+[1] &quot;Reading and merging data for  2017-12-04&quot;
+[1] &quot;Reading and merging data for  2017-12-05&quot;
+[1] &quot;Reading and merging data for  2017-12-06&quot;
+[1] &quot;Reading and merging data for  2017-12-07&quot;
+[1] &quot;Reading and merging data for  2017-12-08&quot;
+[1] &quot;Reading and merging data for  2017-12-09&quot;
+[1] &quot;Reading date for 7 days, starting from 20171210&quot;
+[1] &quot;Reading and merging data for  2017-12-10&quot;
+[1] &quot;Reading and merging data for  2017-12-11&quot;
+[1] &quot;Reading and merging data for  2017-12-12&quot;
+[1] &quot;Reading and merging data for  2017-12-13&quot;
+[1] &quot;Reading and merging data for  2017-12-14&quot;
+[1] &quot;Reading and merging data for  2017-12-15&quot;
+[1] &quot;Reading and merging data for  2017-12-16&quot;
+[1] &quot;Reading date for 7 days, starting from 20171217&quot;
+[1] &quot;Reading and merging data for  2017-12-17&quot;
+[1] &quot;Reading and merging data for  2017-12-18&quot;
+[1] &quot;Reading and merging data for  2017-12-19&quot;
+[1] &quot;Reading and merging data for  2017-12-20&quot;
+[1] &quot;Reading and merging data for  2017-12-21&quot;
+[1] &quot;Reading and merging data for  2017-12-22&quot;
+[1] &quot;Reading and merging data for  2017-12-23&quot;
+[1] &quot;Reading date for 7 days, starting from 20171224&quot;
+[1] &quot;Reading and merging data for  2017-12-24&quot;
+[1] &quot;Reading and merging data for  2017-12-25&quot;
+[1] &quot;Reading and merging data for  2017-12-26&quot;
+[1] &quot;Reading and merging data for  2017-12-27&quot;
+[1] &quot;Reading and merging data for  2017-12-28&quot;
+[1] &quot;Reading and merging data for  2017-12-29&quot;
+[1] &quot;Reading and merging data for  2017-12-30&quot;</code></pre>
+<pre class="r"><code>  print(paste(&quot;Saved data blocks&quot;, blocks))</code></pre>
+<pre><code>[1] &quot;Saved data blocks 52&quot;</code></pre>
+<pre class="r"><code>  #dat%&gt;%mutate(dow=weekdays(datetime))%&gt;%mutate(dow_time=paste(dow,format(datetime, &quot;%H:%M&quot;))) %&gt;%</code></pre>
+<pre class="r"><code># data.raw&lt;-readRDS(data.rds)
+# for (ta in c(12,6,4,3,2,1)){
+#   a.rds &lt;- file.path(data.folder.prepared,paste0(&quot;working-&quot;,ta,&quot;mins.rds&quot;))
+#   if(!file.exists(a.rds)){
+#     print(paste(&quot;Preparing data for time aggregation&quot;,ta,&quot;mins&quot;))
+#     data&lt;-AggregateData(data.raw, ta*2)%&gt;%DropOrImpute(imputeLimit=impute.limit)
+#     series&lt;-colnames(data%&gt;%select(-datetime))
+#     data%&gt;%gather(series,key='node', value='value')%&gt;%group_by(node)%&gt;%
+#     saveRDS(a.rds)
+#     print(paste(&quot;Aggregated data for period&quot;,ta,&quot; saved&quot;))
+#   }else{
+#     print(paste(&quot;Aggregated data exists for period&quot;,ta,&quot; - skipped&quot;))
+#   }
+# }</code></pre>
 </div>
 </div>
 
