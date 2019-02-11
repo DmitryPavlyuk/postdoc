@@ -3,6 +3,8 @@ title: "EWGT2019"
 author: "Dmitry Pavlyuk"
 date: "February 6, 2019"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 This markdown document reproduces the research "Ensemble learning of the spatiotemporal structure of urban traffic
@@ -38,83 +40,91 @@ source(file.path("R","models.R"))
 ```{r sampling}
 
 sample.rds <- file.path(data.folder.prepared,"EWGT2019.rds")
+# Set up temporal aggregation
+ta <- 1 #minutes
+
 if (!file.exists(sample.rds)){
   print("Preparing sample")
+  
+  # Read road network configuration
   config.tibble <- readRDS(config.rds)
   config.nodes <- CombineToNodes(config.tibble)
-  shortest.distances<-CalculateShortestDistances(config.nodes)
-  central.node<-config.nodes%>% filter(node_station_id=="S567")%>%
-    select(node_name)%>%first%>%unlist
-  max.distance.time<-6
-  ta <- 1
-  weeks <- 1:40
   
+  # Calculate shortest distance between every pair of nodes
+  shortest.distances<-CalculateShortestDistances(config.nodes)
+  
+  # Weeks to be include into the research sample
+  weeks <- 1:40 #first 40 weeks of 2017; 30 for historical pattern learning, 10 - for model validation
+  
+  
+  # Research area is all nodes within 6 minutes of travel from an arbitrary selected central node (S567)
+  central.node<-config.nodes%>% filter(node_station_id=="S567")%>%select(node_name)%>%first%>%unlist
+  max.distance.time<-6
   res<- GetNetwork(central.node,shortest.distances,max.distance.time)
+  
+  # Use traffic volume as the only characteristic of interest
   series<-paste0(names(res),".volume")
   
   
-  
-  
+  # Read traffic data for selected nodes week by week
   dat <- tibble()
   for (b in weeks){
     block.file <-file.path(data.folder.prepared, paste0(sprintf("%02d",b),"-",data.rds.file))
-    print(paste("Reading data block",block.file))
     block <- readRDS(block.file)
     cols <- intersect(colnames(block),series)
     block <- block%>%select(datetime,cols)
     dat<-bind_rows(dat,block)
   }
-  dat <- dat%>%mutate(dow=weekdays(datetime))%>%
-    mutate(dow_time=paste(dow,format(datetime, "%H:%M")))%>%
-    AggregateData(ta*2)
-  ser<-colnames(dat%>%select(-datetime))
   
+  
+  # Aggregate data
+  dat <- dat%>%AggregateData(ta*2)
+  series<-colnames(dat%>%select(-datetime))
+  dat <- dat%>%mutate(dow=weekdays(datetime))%>%mutate(dow_time=paste(dow,format(datetime, "%H:%M")))
+  
+  # Prepare first 30 weeks for historical pattern learning
   nhist <- 30*7*24*60/ta
   historical.until <- dat[nhist,]$datetime
+  dat.historical <- dat%>%
+    filter(datetime<=historical.until)
+  #DropOrImpute(imputeLimit=impute.limit)
+  #series<-colnames(dat.historical%>%select(-datetime))
   
-  
+  # Estimate periodical component and outlier bounds using robust statistics (median and iqr)
   outlier.alpha <- 0.05
-  dat.historical <- dat%>%filter(datetime<=historical.until)%>%
-    DropOrImpute(imputeLimit=impute.limit)
-  ser<-colnames(dat.historical%>%select(-datetime))
-  dat.historical <- dat.historical%>%gather(ser,key='node', value='value')%>%
-    mutate(dow=weekdays(datetime))%>%
-    mutate(dow_time=paste(dow,format(datetime, "%H:%M")))%>%
+  dat.historical <- dat.historical%>%gather(series,key='node', value='value')%>%
     group_by(node, dow_time) %>% summarise(s_m=median(value,na.rm = T),
-              s_lb=quantile(value, 0.25, na.rm = T) - (0.15/outlier.alpha)*
-                iqr(value, na.rm = T),
-              s_ub=quantile(value, 0.75, na.rm = T) + (0.15/outlier.alpha)*
-                iqr(value, na.rm = T))
-  ser<-dat.historical%>%select(node)%>%pull
+              s_lb=quantile(value, 0.25, na.rm = T) - (0.15/outlier.alpha)*iqr(value, na.rm = T),
+              s_ub=quantile(value, 0.75, na.rm = T) + (0.15/outlier.alpha)*iqr(value, na.rm = T))
+  
+  #series<-dat.historical%>%select(node)%>%pull
   
   #summary(dat.historical%>%select(dow_time,node,s_m)%>%spread(key = node, value = s_m))
   #ggplot(dat.historical, aes(x = dow_time, y = s_m, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
   
+  # Use weeks 31-40 for modelling
+  # Clean-up (drop missing nodes where number of missed values is higher than impute.limit and impute other missed values)
   dat.training <- dat%>%filter(datetime>historical.until)%>%
     DropOrImpute(imputeLimit=impute.limit)
-  series <- colnames(dat.training%>%select(-datetime))
+  
+  
+  # Exclude nodes with small variation in traffic volumes (errorneous, closed roads, etc.)
+  series <- colnames(dat.training%>%select(-datetime, -dow, -dow_time))
   dat.training <- dat.training%>%gather(series,key='node', value='value')
-  series<-dat.training%>%group_by(node)%>%
-    summarise(sd=sd(value))%>%filter(sd>0.1)%>%select(node)%>%pull
-  res<-gsub(paste0(".volume"),"",series)
-  dat.training <- dat.training%>%filter(node %in% series)%>%
-    mutate(dow=weekdays(datetime))%>%
-    mutate(dow_time=paste(dow,format(datetime, "%H:%M")))
+  series<-dat.training%>%group_by(node)%>%summarise(sd=sd(value))%>%filter(sd>0.1)%>%select(node)%>%pull
   
+  dat.training <- dat.training%>%filter(node %in% series) %>% left_join(dat.historical, by=c("node"="node", "dow_time"="dow_time"))
   
-  dat.training<-dat.training %>% left_join(dat.historical, by=c("node"="node", "dow_time"="dow_time"))
   print(paste("Upper outliers", dat.training%>%filter(value>s_ub, s_ub>0)%>%nrow))
   print(paste("Lower outliers", dat.training%>%filter(value<s_lb)%>%nrow))
-  
-  #ggplot(dat.training, aes(x = datetime, y = value, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
   
   dat.training <- dat.training%>%
     mutate(prepared=(ifelse(value<s_lb,s_lb,ifelse(value>s_ub, s_ub,value))-s_m))%>%
     select(datetime,node,prepared)
     
-  series <- dat.training%>%group_by(node)%>%
-    summarise(sd=sd(value))%>%filter(sd>0.1)%>%select(node)%>%pull
+  series <- dat.training%>%group_by(node)%>%summarise(sd=sd(prepared))%>%filter(sd>0.1)%>%select(node)%>%pull
   dat.training <-dat.training%>%filter(node %in% series)
+  res<-gsub(paste0(".volume"),"",series)
   
   #ggplot(dat.training, aes(x = prepared, col=node, group=node)) + geom_histogram()+facet_wrap( ~ node)
   #ggplot(dat.training, aes(x = datetime, y = prepared, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
@@ -153,9 +163,6 @@ forecastingSteps<-3 #12/ta
 # lagMatrix<-lagMatrix[as.vector(series),as.vector(series)]
 
 
-
-
- results<-tibble()
 trainingSize <- trainingMinutes[1]/ta
 dat.restricted<-mysample$data[(validationStart-trainingSize+1):validationEnd,]
 base_params<-list(data=dat.restricted,
@@ -164,20 +171,62 @@ base_params<-list(data=dat.restricted,
                     forecastEvery=forecastEvery)
 
   params<-c(base_params,list(trainingWindowSize=trainingSize))
-# 
-   res1<-do.call(movingWindow,
-                c(params,list(xModel=xModel.naive)),
-                envir=environment())
-   results<-add_results(results,res1,"naive",trainingSize,ta,forecastingSteps)
 
-#results2<-tibble()
+
+ results<-tibble()
+# 
+   #res1<-do.call(movingWindow,c(params,list(xModel=xModel.naive)), envir=environment())
+   #results<-add_results(results,res1,"naive",trainingSize,ta,forecastingSteps)
+
+   
+   
   res<-do.call(rollingWindow,
-               c(params,list(xModel=xModel.naive,clusterNumber=1)),
+               c(params,list(xModel=xModel.naive)),
                envir=environment())
-  #results2<-add_results(results2,res,"naive",trainingSize,ta,forecastingSteps)
+  results<-bind_rows(results,res)
+
+  res<-do.call(rollingWindow,
+               c(params,list(xModel=xModel.zero)),
+               envir=environment())
+  results<-bind_rows(results,res)
   
-res%>%group_by(forecast_horizon,detector)%>%summarise(mae=mae(actual,forecasted))%>%
-  group_by(forecast_horizon)%>%summarise(mean=mean(mae))
+  res<-do.call(rollingWindow,
+               c(params,list(xModel=xModel.mean)),
+               envir=environment())
+  results<-bind_rows(results,res)
+  
+  res<-do.call(rollingWindow,
+               c(params,list(xModel=xModel.ma)),
+               envir=environment())
+  results<-bind_rows(results,res)
+  
+  res<-do.call(rollingWindow,
+               c(params,list(xModel=xModel.autoarima)),
+               envir=environment())
+  results<-bind_rows(results,res)
+  
+  
+  
+  res<-do.call(rollingWindow,
+               c(params,list(xModel=xModel.star,
+                             lagMatrix=NULL,matrixMode="CCF",
+                             control=list(ccfThreshold=0.3),
+                             arLags=3,complete=F,include.mean=F, clusterNumber=2)),
+               envir=environment())
+  results<-bind_rows(results,res)
+  # 
+  # cl <- makeCluster(1)
+  #   registerDoParallel(cl)
+  # do.call({foreach (i = 1:2,.export=xModel.star$functions,
+  #                 .packages=xModel.star$packages) %dopar% print(constructCorMatrix())},
+  #         list(),
+  #         envir=environment()
+  # )
+  
+source(file.path("R","models.R"))
+source(file.path("R","cv_functions.R"))
+results%>%group_by(model,forecast_horizon,detector)%>%summarise(mae=mae(actual,forecasted))%>%
+  group_by(model,forecast_horizon)%>%summarise(mean=mean(mae))
 
 
   

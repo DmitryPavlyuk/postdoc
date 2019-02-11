@@ -4,14 +4,15 @@ library(e1071)
 library(matrixStats)
 
 
-naiveForecast <-function(sampl, forecastingSteps){
-  print(paste("Naive; training sample: ",rownames(sampl)[1],"-",rownames(sampl)[nrow(sampl)]))
+naiveForecast <-function(sampl, forecastingSteps, verbose=F){
+  if (verbose) print(paste("Naive; training sample: ",rownames(sampl)[1],"-",rownames(sampl)[nrow(sampl)]))
   forecast <- as.numeric(sampl[nrow(sampl),])
   res <- matrix(rep(forecast,each=forecastingSteps),nrow=forecastingSteps)
   colnames(res) <- colnames(sampl)
   return(res)
 }
 xModel.naive <- list(
+  name="naive",
   run = naiveForecast,
   functions = c(),
   packages = c()
@@ -25,6 +26,7 @@ zeroForecast <-function(sampl, forecastingSteps){
 }
 
 xModel.zero <- list(
+  name="HA",
   run = zeroForecast,
   functions = c(),
   packages = c()
@@ -38,6 +40,7 @@ meanForecast <-function(sampl, forecastingSteps){
 }
 
 xModel.mean <- list(
+  name="simpleMean",
   run = meanForecast,
   functions = c(),
   packages = c()
@@ -52,6 +55,7 @@ maForecast <-function(sampl, forecastingSteps, steps=10){
   return(res)
 }
 xModel.ma <- list(
+  name="MA",
   run = maForecast,
   functions = c(),
   packages = c()
@@ -59,8 +63,8 @@ xModel.ma <- list(
 
 
 
-autoArimaForecast <-function(sampl, forecastingSteps, stationary=T, allowdrift =F, allowmean = F){
-  print(paste("Start Auto ARIMA",rownames(sampl)[1]))
+autoArimaForecast <-function(sampl, forecastingSteps, stationary=T, allowdrift =F, allowmean = F, verbose=T){
+  if (verbose) print(paste("Auto ARIMA; training sample: ",rownames(sampl)[1],"-",rownames(sampl)[nrow(sampl)]))
   m <- matrix(nrow = forecastingSteps, ncol = ncol(sampl))
   for (i in 1:ncol(sampl)){
     dat <- sampl[,i]
@@ -70,10 +74,10 @@ autoArimaForecast <-function(sampl, forecastingSteps, stationary=T, allowdrift =
   }
   res <- data.frame(m)
   colnames(res) <- colnames(sampl)
-  print(paste("Completed Auto ARIMA",rownames(sampl)[1]))
   return(res)
 }
 xModel.autoarima <- list(
+  name="autoarima",
   run = autoArimaForecast,
   functions = c(),
   packages = c('forecast')
@@ -365,3 +369,10 @@ univariateFixed <- function(data, series, maxLag=3, include.mean=F){
   }
   return (res)
 }
+
+xModel.star <- list(
+  name="STAR",
+  run = starForecast,
+  functions = c('prepareFixed','constructCorMatrix','univariateFixed','glassoFixed'),
+  packages = c('tidyverse','matrixStats','tseries','e1071','MTS','glasso')
+)

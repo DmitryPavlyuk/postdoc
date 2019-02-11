@@ -76,6 +76,7 @@ movingWindow <- function(data, seriesNames,xModel, trainingWindowSize,
 }
 
 
+
 rollingWindow <- function(data, seriesNames,xModel, trainingWindowSize,
                          forecastingSteps, forecastEvery, clusterNumber=detectCores()-1,
                          outfile="movingWindow.txt",...){
@@ -90,17 +91,16 @@ rollingWindow <- function(data, seriesNames,xModel, trainingWindowSize,
     registerDoParallel(cl)
   }
   seqVals <- seq(1,validationSize, by=forecastEvery)
-  print(paste("Models to estimate: ", length(seqVals)))
-  res <- foreach (i = seqVals,.export=xModel$functions, 
-                  .packages=xModel$packages) %do%
-    xModel$run(df[i:(i+trainingWindowSize-1),], forecastingSteps, ...)
+  print(paste("Models to estimate:", length(seqVals),"Number of clusters:",clusterNumber))
+  xModelF<-xModel$run
+  res <- foreach (i = seqVals,.export=xModel$functions,
+                  .packages=xModel$packages) %dopar%
+    xModelF(df[i:(i+trainingWindowSize-1),], forecastingSteps, ...)
   if (clusterNumber>1) stopCluster(cl)
   count <- 1
   result <- tibble()
   for (i in seqVals){
-    print("Forecasts for ")
     actual <- as.tibble(data[(i+trainingWindowSize):(i+trainingWindowSize-1+forecastingSteps),])
-    print(actual$datetime)
     actual$forecast_horizon<-1:forecastingSteps
     actual$v<-"actual"
     f<-as.tibble(res[[count]])
@@ -111,5 +111,5 @@ rollingWindow <- function(data, seriesNames,xModel, trainingWindowSize,
     result<-bind_rows(result,x)
     count <- count+1
   }
- return(result)
+ return(result%>%mutate(model=xModel$name))
 }

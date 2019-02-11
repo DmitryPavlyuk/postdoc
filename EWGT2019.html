@@ -199,78 +199,88 @@ source(file.path(&quot;R&quot;,&quot;models.R&quot;))</code></pre>
 <pre class="r"><code>sample.rds &lt;- file.path(data.folder.prepared,&quot;EWGT2019.rds&quot;)
 if (!file.exists(sample.rds)){
   print(&quot;Preparing sample&quot;)
+  
+  # Read road network configuration
   config.tibble &lt;- readRDS(config.rds)
   config.nodes &lt;- CombineToNodes(config.tibble)
-  shortest.distances&lt;-CalculateShortestDistances(config.nodes)
-  central.node&lt;-config.nodes%&gt;% filter(node_station_id==&quot;S567&quot;)%&gt;%
-    select(node_name)%&gt;%first%&gt;%unlist
-  max.distance.time&lt;-6
-  ta &lt;- 1
-  weeks &lt;- 1:40
   
+  # Calculate shortest distance between every pair of nodes
+  shortest.distances&lt;-CalculateShortestDistances(config.nodes)
+  
+  # Set up temporal aggregation and weeks to be include into the research sample
+  ta &lt;- 1 #minutes
+  weeks &lt;- 1:40 #first 40 weeks of 2017; 30 for historical pattern learning, 10 - for model validation
+  
+  
+  # Research area is all nodes within 6 minutes of travel from an arbitrary selected central node (S567)
+  central.node&lt;-config.nodes%&gt;% filter(node_station_id==&quot;S567&quot;)%&gt;%select(node_name)%&gt;%first%&gt;%unlist
+  max.distance.time&lt;-6
   res&lt;- GetNetwork(central.node,shortest.distances,max.distance.time)
+  
+  # Use traffic volume as the only characteristic of interest
   series&lt;-paste0(names(res),&quot;.volume&quot;)
   
   
-  
-  
+  # Read traffic data for selected nodes week by week
   dat &lt;- tibble()
   for (b in weeks){
     block.file &lt;-file.path(data.folder.prepared, paste0(sprintf(&quot;%02d&quot;,b),&quot;-&quot;,data.rds.file))
-    print(paste(&quot;Reading data block&quot;,block.file))
     block &lt;- readRDS(block.file)
     cols &lt;- intersect(colnames(block),series)
     block &lt;- block%&gt;%select(datetime,cols)
     dat&lt;-bind_rows(dat,block)
   }
-  dat &lt;- dat%&gt;%mutate(dow=weekdays(datetime))%&gt;%
-    mutate(dow_time=paste(dow,format(datetime, &quot;%H:%M&quot;)))%&gt;%
-    AggregateData(ta*2)
-  ser&lt;-colnames(dat%&gt;%select(-datetime))
   
+  
+  # Aggregate data
+  dat &lt;- dat%&gt;%AggregateData(ta*2)
+  series&lt;-colnames(dat%&gt;%select(-datetime))
+  dat &lt;- dat%&gt;%mutate(dow=weekdays(datetime))%&gt;%mutate(dow_time=paste(dow,format(datetime, &quot;%H:%M&quot;)))
+  
+  # Prepare first 30 weeks for historical pattern learning
   nhist &lt;- 30*7*24*60/ta
   historical.until &lt;- dat[nhist,]$datetime
+  dat.historical &lt;- dat%&gt;%
+    filter(datetime&lt;=historical.until)
+  #DropOrImpute(imputeLimit=impute.limit)
+  #series&lt;-colnames(dat.historical%&gt;%select(-datetime))
   
-  
+  # Estimate periodical component and outlier bounds using robust statistics (median and iqr)
   outlier.alpha &lt;- 0.05
-  dat.historical &lt;- dat%&gt;%filter(datetime&lt;=historical.until)%&gt;%
-    DropOrImpute(imputeLimit=impute.limit)
-  ser&lt;-colnames(dat.historical%&gt;%select(-datetime))
-  dat.historical &lt;- dat.historical%&gt;%gather(ser,key='node', value='value')%&gt;%
-    mutate(dow=weekdays(datetime))%&gt;%
-    mutate(dow_time=paste(dow,format(datetime, &quot;%H:%M&quot;)))%&gt;%
+  dat.historical &lt;- dat.historical%&gt;%gather(series,key='node', value='value')%&gt;%
     group_by(node, dow_time) %&gt;% summarise(s_m=median(value,na.rm = T),
-              s_lb=quantile(value, 0.25, na.rm = T) - (0.15/outlier.alpha)*
-                iqr(value, na.rm = T),
-              s_ub=quantile(value, 0.75, na.rm = T) + (0.15/outlier.alpha)*
-                iqr(value, na.rm = T))
-  ser&lt;-dat.historical%&gt;%select(node)%&gt;%pull
+              s_lb=quantile(value, 0.25, na.rm = T) - (0.15/outlier.alpha)*iqr(value, na.rm = T),
+              s_ub=quantile(value, 0.75, na.rm = T) + (0.15/outlier.alpha)*iqr(value, na.rm = T))
+  
+  #series&lt;-dat.historical%&gt;%select(node)%&gt;%pull
   
   #summary(dat.historical%&gt;%select(dow_time,node,s_m)%&gt;%spread(key = node, value = s_m))
   #ggplot(dat.historical, aes(x = dow_time, y = s_m, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
   
+  # Use weeks 31-40 for modelling
+  # Clean-up (drop missing nodes where number of missed values is higher than impute.limit and impute other missed values)
   dat.training &lt;- dat%&gt;%filter(datetime&gt;historical.until)%&gt;%
     DropOrImpute(imputeLimit=impute.limit)
-  series &lt;- colnames(dat.training%&gt;%select(-datetime))
+  
+  
+  # Exclude nodes with small variation in traffic volumes (errorneous, closed roads, etc.)
+  series &lt;- colnames(dat.training%&gt;%select(-datetime, -dow, -dow_time))
   dat.training &lt;- dat.training%&gt;%gather(series,key='node', value='value')
-  series&lt;-dat.training%&gt;%group_by(node)%&gt;%
-    summarise(sd=sd(value))%&gt;%filter(sd&gt;0.1)%&gt;%select(node)%&gt;%pull
-  res&lt;-gsub(paste0(&quot;.volume&quot;),&quot;&quot;,series)
-  dat.training &lt;- dat.training%&gt;%filter(node %in% series)%&gt;%
-    mutate(dow=weekdays(datetime))%&gt;%
-    mutate(dow_time=paste(dow,format(datetime, &quot;%H:%M&quot;)))
+  series&lt;-dat.training%&gt;%group_by(node)%&gt;%summarise(sd=sd(value))%&gt;%filter(sd&gt;0.1)%&gt;%select(node)%&gt;%pull
   
+  dat.training &lt;- dat.training%&gt;%filter(node %in% series) %&gt;% left_join(dat.historical, by=c(&quot;node&quot;=&quot;node&quot;, &quot;dow_time&quot;=&quot;dow_time&quot;))
   
-  dat.training&lt;-dat.training %&gt;% left_join(dat.historical, by=c(&quot;node&quot;=&quot;node&quot;, &quot;dow_time&quot;=&quot;dow_time&quot;))
   print(paste(&quot;Upper outliers&quot;, dat.training%&gt;%filter(value&gt;s_ub, s_ub&gt;0)%&gt;%nrow))
   print(paste(&quot;Lower outliers&quot;, dat.training%&gt;%filter(value&lt;s_lb)%&gt;%nrow))
-  
-  #ggplot(dat.training, aes(x = datetime, y = value, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
   
   dat.training &lt;- dat.training%&gt;%
     mutate(prepared=(ifelse(value&lt;s_lb,s_lb,ifelse(value&gt;s_ub, s_ub,value))-s_m))%&gt;%
     select(datetime,node,prepared)
     
+  series &lt;- dat.training%&gt;%group_by(node)%&gt;%summarise(sd=sd(prepared))%&gt;%filter(sd&gt;0.1)%&gt;%select(node)%&gt;%pull
+  dat.training &lt;-dat.training%&gt;%filter(node %in% series)
+  res&lt;-gsub(paste0(&quot;.volume&quot;),&quot;&quot;,series)
+  
   #ggplot(dat.training, aes(x = prepared, col=node, group=node)) + geom_histogram()+facet_wrap( ~ node)
   #ggplot(dat.training, aes(x = datetime, y = prepared, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
   
@@ -284,51 +294,50 @@ if (!file.exists(sample.rds)){
 }</code></pre>
 <pre><code>[1] &quot;Preparing sample&quot;</code></pre>
 <pre><code>Warning: package 'bindrcpp' was built under R version 3.4.4</code></pre>
-<pre><code>[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/01-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/02-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/03-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/04-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/05-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/06-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/07-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/08-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/09-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/10-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/11-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/12-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/13-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/14-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/15-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/16-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/17-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/18-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/19-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/20-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/21-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/22-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/23-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/24-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/25-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/26-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/27-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/28-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/29-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/30-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/31-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/32-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/33-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/34-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/35-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/36-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/37-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/38-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/39-working-raw.rds&quot;
-[1] &quot;Reading data block C:/Dmitry/projects/postdoc/data/prepared/40-working-raw.rds&quot;
-[1] &quot;Upper outliers 70762&quot;
-[1] &quot;Lower outliers 101372&quot;</code></pre>
+<pre><code>[1] &quot;Upper outliers 80777&quot;
+[1] &quot;Lower outliers 117985&quot;</code></pre>
 <pre class="r"><code>series &lt;- colnames(mysample$data)[-1]
 print(paste(&quot;Number of series&quot;, length(series)))</code></pre>
-<pre><code>[1] &quot;Number of series 111&quot;</code></pre>
+<pre><code>[1] &quot;Number of series 110&quot;</code></pre>
+<pre class="r"><code>mysample$data%&gt;%gather(series,key='node', value='value')%&gt;%group_by(node)%&gt;%
+    summarise(sd=sd(value))%&gt;%filter(sd&gt;0.1)%&gt;%select(node)%&gt;%pull</code></pre>
+<pre><code>  [1] &quot;rnd_1368.volume&quot;  &quot;rnd_1371.volume&quot;  &quot;rnd_172.volume&quot;  
+  [4] &quot;rnd_173.volume&quot;   &quot;rnd_174.volume&quot;   &quot;rnd_301.volume&quot;  
+  [7] &quot;rnd_85567.volume&quot; &quot;rnd_85573.volume&quot; &quot;rnd_85577.volume&quot;
+ [10] &quot;rnd_85579.volume&quot; &quot;rnd_85581.volume&quot; &quot;rnd_85583.volume&quot;
+ [13] &quot;rnd_85585.volume&quot; &quot;rnd_85587.volume&quot; &quot;rnd_85589.volume&quot;
+ [16] &quot;rnd_85591.volume&quot; &quot;rnd_85593.volume&quot; &quot;rnd_85595.volume&quot;
+ [19] &quot;rnd_85599.volume&quot; &quot;rnd_85601.volume&quot; &quot;rnd_85605.volume&quot;
+ [22] &quot;rnd_86457.volume&quot; &quot;rnd_86459.volume&quot; &quot;rnd_86469.volume&quot;
+ [25] &quot;rnd_86471.volume&quot; &quot;rnd_86473.volume&quot; &quot;rnd_86475.volume&quot;
+ [28] &quot;rnd_86477.volume&quot; &quot;rnd_86479.volume&quot; &quot;rnd_86483.volume&quot;
+ [31] &quot;rnd_86485.volume&quot; &quot;rnd_86487.volume&quot; &quot;rnd_86489.volume&quot;
+ [34] &quot;rnd_86493.volume&quot; &quot;rnd_86495.volume&quot; &quot;rnd_86497.volume&quot;
+ [37] &quot;rnd_86499.volume&quot; &quot;rnd_86615.volume&quot; &quot;rnd_86617.volume&quot;
+ [40] &quot;rnd_86619.volume&quot; &quot;rnd_86623.volume&quot; &quot;rnd_86625.volume&quot;
+ [43] &quot;rnd_86627.volume&quot; &quot;rnd_86629.volume&quot; &quot;rnd_86631.volume&quot;
+ [46] &quot;rnd_86633.volume&quot; &quot;rnd_86895.volume&quot; &quot;rnd_86899.volume&quot;
+ [49] &quot;rnd_86901.volume&quot; &quot;rnd_86937.volume&quot; &quot;rnd_86939.volume&quot;
+ [52] &quot;rnd_86941.volume&quot; &quot;rnd_86945.volume&quot; &quot;rnd_86947.volume&quot;
+ [55] &quot;rnd_86949.volume&quot; &quot;rnd_86951.volume&quot; &quot;rnd_86953.volume&quot;
+ [58] &quot;rnd_86955.volume&quot; &quot;rnd_86959.volume&quot; &quot;rnd_86961.volume&quot;
+ [61] &quot;rnd_86965.volume&quot; &quot;rnd_86967.volume&quot; &quot;rnd_86969.volume&quot;
+ [64] &quot;rnd_86971.volume&quot; &quot;rnd_86973.volume&quot; &quot;rnd_86977.volume&quot;
+ [67] &quot;rnd_86979.volume&quot; &quot;rnd_87449.volume&quot; &quot;rnd_87451.volume&quot;
+ [70] &quot;rnd_87453.volume&quot; &quot;rnd_87455.volume&quot; &quot;rnd_87457.volume&quot;
+ [73] &quot;rnd_87459.volume&quot; &quot;rnd_87461.volume&quot; &quot;rnd_88305.volume&quot;
+ [76] &quot;rnd_88311.volume&quot; &quot;rnd_88315.volume&quot; &quot;rnd_88319.volume&quot;
+ [79] &quot;rnd_88321.volume&quot; &quot;rnd_88325.volume&quot; &quot;rnd_88327.volume&quot;
+ [82] &quot;rnd_88329.volume&quot; &quot;rnd_88331.volume&quot; &quot;rnd_88333.volume&quot;
+ [85] &quot;rnd_88335.volume&quot; &quot;rnd_88337.volume&quot; &quot;rnd_88549.volume&quot;
+ [88] &quot;rnd_88573.volume&quot; &quot;rnd_88577.volume&quot; &quot;rnd_88579.volume&quot;
+ [91] &quot;rnd_88599.volume&quot; &quot;rnd_88631.volume&quot; &quot;rnd_88929.volume&quot;
+ [94] &quot;rnd_88931.volume&quot; &quot;rnd_89113.volume&quot; &quot;rnd_89115.volume&quot;
+ [97] &quot;rnd_89117.volume&quot; &quot;rnd_89275.volume&quot; &quot;rnd_89277.volume&quot;
+[100] &quot;rnd_89279.volume&quot; &quot;rnd_89281.volume&quot; &quot;rnd_89577.volume&quot;
+[103] &quot;rnd_93565.volume&quot; &quot;rnd_95331.volume&quot; &quot;rnd_95335.volume&quot;
+[106] &quot;rnd_95341.volume&quot; &quot;rnd_95345.volume&quot; &quot;rnd_95776.volume&quot;
+[109] &quot;rnd_95787.volume&quot; &quot;rnd_95833.volume&quot;</code></pre>
 <pre class="r"><code>trainingMinutes &lt;- seq(480,480, by=120)
 validationSize &lt;- 7*24*60/ta
 validationEnd &lt;- nrow(mysample$data)
@@ -365,1351 +374,7 @@ base_params&lt;-list(data=dat.restricted,
   res&lt;-do.call(rollingWindow,
                c(params,list(xModel=xModel.naive,clusterNumber=1)),
                envir=environment())</code></pre>
-<pre><code>[1] &quot;Models to estimate:  336&quot;
-[1] &quot;Naive; training sample:  2017-09-30 16:01:00 - 2017-10-01 00:00:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 16:31:00 - 2017-10-01 00:30:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 17:01:00 - 2017-10-01 01:00:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 17:31:00 - 2017-10-01 01:30:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 18:01:00 - 2017-10-01 02:00:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 18:31:00 - 2017-10-01 02:30:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 19:01:00 - 2017-10-01 03:00:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 19:31:00 - 2017-10-01 03:30:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 20:01:00 - 2017-10-01 04:00:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 20:31:00 - 2017-10-01 04:30:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 21:01:00 - 2017-10-01 05:00:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 21:31:00 - 2017-10-01 05:30:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 22:01:00 - 2017-10-01 06:00:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 22:31:00 - 2017-10-01 06:30:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 23:01:00 - 2017-10-01 07:00:00&quot;
-[1] &quot;Naive; training sample:  2017-09-30 23:31:00 - 2017-10-01 07:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 00:01:00 - 2017-10-01 08:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 00:31:00 - 2017-10-01 08:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 01:01:00 - 2017-10-01 09:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 01:31:00 - 2017-10-01 09:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 02:01:00 - 2017-10-01 10:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 02:31:00 - 2017-10-01 10:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 03:01:00 - 2017-10-01 11:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 03:31:00 - 2017-10-01 11:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 04:01:00 - 2017-10-01 12:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 04:31:00 - 2017-10-01 12:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 05:01:00 - 2017-10-01 13:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 05:31:00 - 2017-10-01 13:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 06:01:00 - 2017-10-01 14:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 06:31:00 - 2017-10-01 14:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 07:01:00 - 2017-10-01 15:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 07:31:00 - 2017-10-01 15:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 08:01:00 - 2017-10-01 16:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 08:31:00 - 2017-10-01 16:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 09:01:00 - 2017-10-01 17:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 09:31:00 - 2017-10-01 17:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 10:01:00 - 2017-10-01 18:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 10:31:00 - 2017-10-01 18:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 11:01:00 - 2017-10-01 19:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 11:31:00 - 2017-10-01 19:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 12:01:00 - 2017-10-01 20:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 12:31:00 - 2017-10-01 20:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 13:01:00 - 2017-10-01 21:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 13:31:00 - 2017-10-01 21:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 14:01:00 - 2017-10-01 22:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 14:31:00 - 2017-10-01 22:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 15:01:00 - 2017-10-01 23:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 15:31:00 - 2017-10-01 23:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 16:01:00 - 2017-10-02 00:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 16:31:00 - 2017-10-02 00:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 17:01:00 - 2017-10-02 01:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 17:31:00 - 2017-10-02 01:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 18:01:00 - 2017-10-02 02:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 18:31:00 - 2017-10-02 02:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 19:01:00 - 2017-10-02 03:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 19:31:00 - 2017-10-02 03:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 20:01:00 - 2017-10-02 04:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 20:31:00 - 2017-10-02 04:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 21:01:00 - 2017-10-02 05:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 21:31:00 - 2017-10-02 05:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 22:01:00 - 2017-10-02 06:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 22:31:00 - 2017-10-02 06:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 23:01:00 - 2017-10-02 07:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-01 23:31:00 - 2017-10-02 07:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 00:01:00 - 2017-10-02 08:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 00:31:00 - 2017-10-02 08:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 01:01:00 - 2017-10-02 09:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 01:31:00 - 2017-10-02 09:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 02:01:00 - 2017-10-02 10:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 02:31:00 - 2017-10-02 10:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 03:01:00 - 2017-10-02 11:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 03:31:00 - 2017-10-02 11:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 04:01:00 - 2017-10-02 12:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 04:31:00 - 2017-10-02 12:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 05:01:00 - 2017-10-02 13:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 05:31:00 - 2017-10-02 13:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 06:01:00 - 2017-10-02 14:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 06:31:00 - 2017-10-02 14:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 07:01:00 - 2017-10-02 15:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 07:31:00 - 2017-10-02 15:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 08:01:00 - 2017-10-02 16:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 08:31:00 - 2017-10-02 16:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 09:01:00 - 2017-10-02 17:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 09:31:00 - 2017-10-02 17:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 10:01:00 - 2017-10-02 18:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 10:31:00 - 2017-10-02 18:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 11:01:00 - 2017-10-02 19:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 11:31:00 - 2017-10-02 19:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 12:01:00 - 2017-10-02 20:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 12:31:00 - 2017-10-02 20:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 13:01:00 - 2017-10-02 21:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 13:31:00 - 2017-10-02 21:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 14:01:00 - 2017-10-02 22:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 14:31:00 - 2017-10-02 22:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 15:01:00 - 2017-10-02 23:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 15:31:00 - 2017-10-02 23:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 16:01:00 - 2017-10-03 00:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 16:31:00 - 2017-10-03 00:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 17:01:00 - 2017-10-03 01:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 17:31:00 - 2017-10-03 01:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 18:01:00 - 2017-10-03 02:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 18:31:00 - 2017-10-03 02:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 19:01:00 - 2017-10-03 03:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 19:31:00 - 2017-10-03 03:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 20:01:00 - 2017-10-03 04:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 20:31:00 - 2017-10-03 04:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 21:01:00 - 2017-10-03 05:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 21:31:00 - 2017-10-03 05:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 22:01:00 - 2017-10-03 06:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 22:31:00 - 2017-10-03 06:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 23:01:00 - 2017-10-03 07:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-02 23:31:00 - 2017-10-03 07:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 00:01:00 - 2017-10-03 08:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 00:31:00 - 2017-10-03 08:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 01:01:00 - 2017-10-03 09:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 01:31:00 - 2017-10-03 09:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 02:01:00 - 2017-10-03 10:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 02:31:00 - 2017-10-03 10:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 03:01:00 - 2017-10-03 11:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 03:31:00 - 2017-10-03 11:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 04:01:00 - 2017-10-03 12:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 04:31:00 - 2017-10-03 12:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 05:01:00 - 2017-10-03 13:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 05:31:00 - 2017-10-03 13:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 06:01:00 - 2017-10-03 14:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 06:31:00 - 2017-10-03 14:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 07:01:00 - 2017-10-03 15:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 07:31:00 - 2017-10-03 15:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 08:01:00 - 2017-10-03 16:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 08:31:00 - 2017-10-03 16:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 09:01:00 - 2017-10-03 17:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 09:31:00 - 2017-10-03 17:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 10:01:00 - 2017-10-03 18:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 10:31:00 - 2017-10-03 18:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 11:01:00 - 2017-10-03 19:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 11:31:00 - 2017-10-03 19:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 12:01:00 - 2017-10-03 20:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 12:31:00 - 2017-10-03 20:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 13:01:00 - 2017-10-03 21:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 13:31:00 - 2017-10-03 21:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 14:01:00 - 2017-10-03 22:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 14:31:00 - 2017-10-03 22:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 15:01:00 - 2017-10-03 23:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 15:31:00 - 2017-10-03 23:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 16:01:00 - 2017-10-04 00:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 16:31:00 - 2017-10-04 00:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 17:01:00 - 2017-10-04 01:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 17:31:00 - 2017-10-04 01:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 18:01:00 - 2017-10-04 02:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 18:31:00 - 2017-10-04 02:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 19:01:00 - 2017-10-04 03:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 19:31:00 - 2017-10-04 03:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 20:01:00 - 2017-10-04 04:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 20:31:00 - 2017-10-04 04:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 21:01:00 - 2017-10-04 05:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 21:31:00 - 2017-10-04 05:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 22:01:00 - 2017-10-04 06:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 22:31:00 - 2017-10-04 06:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 23:01:00 - 2017-10-04 07:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-03 23:31:00 - 2017-10-04 07:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 00:01:00 - 2017-10-04 08:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 00:31:00 - 2017-10-04 08:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 01:01:00 - 2017-10-04 09:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 01:31:00 - 2017-10-04 09:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 02:01:00 - 2017-10-04 10:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 02:31:00 - 2017-10-04 10:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 03:01:00 - 2017-10-04 11:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 03:31:00 - 2017-10-04 11:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 04:01:00 - 2017-10-04 12:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 04:31:00 - 2017-10-04 12:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 05:01:00 - 2017-10-04 13:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 05:31:00 - 2017-10-04 13:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 06:01:00 - 2017-10-04 14:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 06:31:00 - 2017-10-04 14:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 07:01:00 - 2017-10-04 15:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 07:31:00 - 2017-10-04 15:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 08:01:00 - 2017-10-04 16:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 08:31:00 - 2017-10-04 16:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 09:01:00 - 2017-10-04 17:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 09:31:00 - 2017-10-04 17:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 10:01:00 - 2017-10-04 18:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 10:31:00 - 2017-10-04 18:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 11:01:00 - 2017-10-04 19:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 11:31:00 - 2017-10-04 19:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 12:01:00 - 2017-10-04 20:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 12:31:00 - 2017-10-04 20:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 13:01:00 - 2017-10-04 21:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 13:31:00 - 2017-10-04 21:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 14:01:00 - 2017-10-04 22:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 14:31:00 - 2017-10-04 22:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 15:01:00 - 2017-10-04 23:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 15:31:00 - 2017-10-04 23:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 16:01:00 - 2017-10-05 00:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 16:31:00 - 2017-10-05 00:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 17:01:00 - 2017-10-05 01:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 17:31:00 - 2017-10-05 01:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 18:01:00 - 2017-10-05 02:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 18:31:00 - 2017-10-05 02:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 19:01:00 - 2017-10-05 03:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 19:31:00 - 2017-10-05 03:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 20:01:00 - 2017-10-05 04:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 20:31:00 - 2017-10-05 04:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 21:01:00 - 2017-10-05 05:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 21:31:00 - 2017-10-05 05:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 22:01:00 - 2017-10-05 06:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 22:31:00 - 2017-10-05 06:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 23:01:00 - 2017-10-05 07:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-04 23:31:00 - 2017-10-05 07:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 00:01:00 - 2017-10-05 08:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 00:31:00 - 2017-10-05 08:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 01:01:00 - 2017-10-05 09:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 01:31:00 - 2017-10-05 09:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 02:01:00 - 2017-10-05 10:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 02:31:00 - 2017-10-05 10:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 03:01:00 - 2017-10-05 11:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 03:31:00 - 2017-10-05 11:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 04:01:00 - 2017-10-05 12:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 04:31:00 - 2017-10-05 12:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 05:01:00 - 2017-10-05 13:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 05:31:00 - 2017-10-05 13:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 06:01:00 - 2017-10-05 14:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 06:31:00 - 2017-10-05 14:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 07:01:00 - 2017-10-05 15:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 07:31:00 - 2017-10-05 15:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 08:01:00 - 2017-10-05 16:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 08:31:00 - 2017-10-05 16:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 09:01:00 - 2017-10-05 17:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 09:31:00 - 2017-10-05 17:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 10:01:00 - 2017-10-05 18:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 10:31:00 - 2017-10-05 18:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 11:01:00 - 2017-10-05 19:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 11:31:00 - 2017-10-05 19:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 12:01:00 - 2017-10-05 20:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 12:31:00 - 2017-10-05 20:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 13:01:00 - 2017-10-05 21:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 13:31:00 - 2017-10-05 21:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 14:01:00 - 2017-10-05 22:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 14:31:00 - 2017-10-05 22:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 15:01:00 - 2017-10-05 23:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 15:31:00 - 2017-10-05 23:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 16:01:00 - 2017-10-06 00:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 16:31:00 - 2017-10-06 00:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 17:01:00 - 2017-10-06 01:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 17:31:00 - 2017-10-06 01:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 18:01:00 - 2017-10-06 02:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 18:31:00 - 2017-10-06 02:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 19:01:00 - 2017-10-06 03:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 19:31:00 - 2017-10-06 03:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 20:01:00 - 2017-10-06 04:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 20:31:00 - 2017-10-06 04:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 21:01:00 - 2017-10-06 05:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 21:31:00 - 2017-10-06 05:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 22:01:00 - 2017-10-06 06:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 22:31:00 - 2017-10-06 06:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 23:01:00 - 2017-10-06 07:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-05 23:31:00 - 2017-10-06 07:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 00:01:00 - 2017-10-06 08:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 00:31:00 - 2017-10-06 08:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 01:01:00 - 2017-10-06 09:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 01:31:00 - 2017-10-06 09:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 02:01:00 - 2017-10-06 10:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 02:31:00 - 2017-10-06 10:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 03:01:00 - 2017-10-06 11:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 03:31:00 - 2017-10-06 11:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 04:01:00 - 2017-10-06 12:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 04:31:00 - 2017-10-06 12:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 05:01:00 - 2017-10-06 13:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 05:31:00 - 2017-10-06 13:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 06:01:00 - 2017-10-06 14:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 06:31:00 - 2017-10-06 14:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 07:01:00 - 2017-10-06 15:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 07:31:00 - 2017-10-06 15:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 08:01:00 - 2017-10-06 16:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 08:31:00 - 2017-10-06 16:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 09:01:00 - 2017-10-06 17:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 09:31:00 - 2017-10-06 17:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 10:01:00 - 2017-10-06 18:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 10:31:00 - 2017-10-06 18:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 11:01:00 - 2017-10-06 19:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 11:31:00 - 2017-10-06 19:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 12:01:00 - 2017-10-06 20:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 12:31:00 - 2017-10-06 20:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 13:01:00 - 2017-10-06 21:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 13:31:00 - 2017-10-06 21:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 14:01:00 - 2017-10-06 22:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 14:31:00 - 2017-10-06 22:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 15:01:00 - 2017-10-06 23:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 15:31:00 - 2017-10-06 23:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 16:01:00 - 2017-10-07 00:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 16:31:00 - 2017-10-07 00:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 17:01:00 - 2017-10-07 01:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 17:31:00 - 2017-10-07 01:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 18:01:00 - 2017-10-07 02:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 18:31:00 - 2017-10-07 02:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 19:01:00 - 2017-10-07 03:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 19:31:00 - 2017-10-07 03:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 20:01:00 - 2017-10-07 04:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 20:31:00 - 2017-10-07 04:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 21:01:00 - 2017-10-07 05:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 21:31:00 - 2017-10-07 05:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 22:01:00 - 2017-10-07 06:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 22:31:00 - 2017-10-07 06:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 23:01:00 - 2017-10-07 07:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-06 23:31:00 - 2017-10-07 07:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 00:01:00 - 2017-10-07 08:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 00:31:00 - 2017-10-07 08:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 01:01:00 - 2017-10-07 09:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 01:31:00 - 2017-10-07 09:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 02:01:00 - 2017-10-07 10:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 02:31:00 - 2017-10-07 10:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 03:01:00 - 2017-10-07 11:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 03:31:00 - 2017-10-07 11:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 04:01:00 - 2017-10-07 12:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 04:31:00 - 2017-10-07 12:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 05:01:00 - 2017-10-07 13:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 05:31:00 - 2017-10-07 13:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 06:01:00 - 2017-10-07 14:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 06:31:00 - 2017-10-07 14:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 07:01:00 - 2017-10-07 15:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 07:31:00 - 2017-10-07 15:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 08:01:00 - 2017-10-07 16:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 08:31:00 - 2017-10-07 16:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 09:01:00 - 2017-10-07 17:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 09:31:00 - 2017-10-07 17:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 10:01:00 - 2017-10-07 18:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 10:31:00 - 2017-10-07 18:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 11:01:00 - 2017-10-07 19:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 11:31:00 - 2017-10-07 19:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 12:01:00 - 2017-10-07 20:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 12:31:00 - 2017-10-07 20:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 13:01:00 - 2017-10-07 21:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 13:31:00 - 2017-10-07 21:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 14:01:00 - 2017-10-07 22:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 14:31:00 - 2017-10-07 22:30:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 15:01:00 - 2017-10-07 23:00:00&quot;
-[1] &quot;Naive; training sample:  2017-10-07 15:31:00 - 2017-10-07 23:30:00&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 00:01:00 UTC&quot; &quot;2017-10-01 00:02:00 UTC&quot;
-[3] &quot;2017-10-01 00:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 00:31:00 UTC&quot; &quot;2017-10-01 00:32:00 UTC&quot;
-[3] &quot;2017-10-01 00:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 01:01:00 UTC&quot; &quot;2017-10-01 01:02:00 UTC&quot;
-[3] &quot;2017-10-01 01:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 01:31:00 UTC&quot; &quot;2017-10-01 01:32:00 UTC&quot;
-[3] &quot;2017-10-01 01:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 02:01:00 UTC&quot; &quot;2017-10-01 02:02:00 UTC&quot;
-[3] &quot;2017-10-01 02:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 02:31:00 UTC&quot; &quot;2017-10-01 02:32:00 UTC&quot;
-[3] &quot;2017-10-01 02:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 03:01:00 UTC&quot; &quot;2017-10-01 03:02:00 UTC&quot;
-[3] &quot;2017-10-01 03:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 03:31:00 UTC&quot; &quot;2017-10-01 03:32:00 UTC&quot;
-[3] &quot;2017-10-01 03:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 04:01:00 UTC&quot; &quot;2017-10-01 04:02:00 UTC&quot;
-[3] &quot;2017-10-01 04:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 04:31:00 UTC&quot; &quot;2017-10-01 04:32:00 UTC&quot;
-[3] &quot;2017-10-01 04:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 05:01:00 UTC&quot; &quot;2017-10-01 05:02:00 UTC&quot;
-[3] &quot;2017-10-01 05:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 05:31:00 UTC&quot; &quot;2017-10-01 05:32:00 UTC&quot;
-[3] &quot;2017-10-01 05:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 06:01:00 UTC&quot; &quot;2017-10-01 06:02:00 UTC&quot;
-[3] &quot;2017-10-01 06:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 06:31:00 UTC&quot; &quot;2017-10-01 06:32:00 UTC&quot;
-[3] &quot;2017-10-01 06:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 07:01:00 UTC&quot; &quot;2017-10-01 07:02:00 UTC&quot;
-[3] &quot;2017-10-01 07:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 07:31:00 UTC&quot; &quot;2017-10-01 07:32:00 UTC&quot;
-[3] &quot;2017-10-01 07:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 08:01:00 UTC&quot; &quot;2017-10-01 08:02:00 UTC&quot;
-[3] &quot;2017-10-01 08:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 08:31:00 UTC&quot; &quot;2017-10-01 08:32:00 UTC&quot;
-[3] &quot;2017-10-01 08:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 09:01:00 UTC&quot; &quot;2017-10-01 09:02:00 UTC&quot;
-[3] &quot;2017-10-01 09:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 09:31:00 UTC&quot; &quot;2017-10-01 09:32:00 UTC&quot;
-[3] &quot;2017-10-01 09:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 10:01:00 UTC&quot; &quot;2017-10-01 10:02:00 UTC&quot;
-[3] &quot;2017-10-01 10:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 10:31:00 UTC&quot; &quot;2017-10-01 10:32:00 UTC&quot;
-[3] &quot;2017-10-01 10:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 11:01:00 UTC&quot; &quot;2017-10-01 11:02:00 UTC&quot;
-[3] &quot;2017-10-01 11:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 11:31:00 UTC&quot; &quot;2017-10-01 11:32:00 UTC&quot;
-[3] &quot;2017-10-01 11:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 12:01:00 UTC&quot; &quot;2017-10-01 12:02:00 UTC&quot;
-[3] &quot;2017-10-01 12:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 12:31:00 UTC&quot; &quot;2017-10-01 12:32:00 UTC&quot;
-[3] &quot;2017-10-01 12:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 13:01:00 UTC&quot; &quot;2017-10-01 13:02:00 UTC&quot;
-[3] &quot;2017-10-01 13:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 13:31:00 UTC&quot; &quot;2017-10-01 13:32:00 UTC&quot;
-[3] &quot;2017-10-01 13:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 14:01:00 UTC&quot; &quot;2017-10-01 14:02:00 UTC&quot;
-[3] &quot;2017-10-01 14:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 14:31:00 UTC&quot; &quot;2017-10-01 14:32:00 UTC&quot;
-[3] &quot;2017-10-01 14:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 15:01:00 UTC&quot; &quot;2017-10-01 15:02:00 UTC&quot;
-[3] &quot;2017-10-01 15:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 15:31:00 UTC&quot; &quot;2017-10-01 15:32:00 UTC&quot;
-[3] &quot;2017-10-01 15:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 16:01:00 UTC&quot; &quot;2017-10-01 16:02:00 UTC&quot;
-[3] &quot;2017-10-01 16:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 16:31:00 UTC&quot; &quot;2017-10-01 16:32:00 UTC&quot;
-[3] &quot;2017-10-01 16:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 17:01:00 UTC&quot; &quot;2017-10-01 17:02:00 UTC&quot;
-[3] &quot;2017-10-01 17:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 17:31:00 UTC&quot; &quot;2017-10-01 17:32:00 UTC&quot;
-[3] &quot;2017-10-01 17:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 18:01:00 UTC&quot; &quot;2017-10-01 18:02:00 UTC&quot;
-[3] &quot;2017-10-01 18:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 18:31:00 UTC&quot; &quot;2017-10-01 18:32:00 UTC&quot;
-[3] &quot;2017-10-01 18:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 19:01:00 UTC&quot; &quot;2017-10-01 19:02:00 UTC&quot;
-[3] &quot;2017-10-01 19:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 19:31:00 UTC&quot; &quot;2017-10-01 19:32:00 UTC&quot;
-[3] &quot;2017-10-01 19:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 20:01:00 UTC&quot; &quot;2017-10-01 20:02:00 UTC&quot;
-[3] &quot;2017-10-01 20:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 20:31:00 UTC&quot; &quot;2017-10-01 20:32:00 UTC&quot;
-[3] &quot;2017-10-01 20:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 21:01:00 UTC&quot; &quot;2017-10-01 21:02:00 UTC&quot;
-[3] &quot;2017-10-01 21:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 21:31:00 UTC&quot; &quot;2017-10-01 21:32:00 UTC&quot;
-[3] &quot;2017-10-01 21:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 22:01:00 UTC&quot; &quot;2017-10-01 22:02:00 UTC&quot;
-[3] &quot;2017-10-01 22:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 22:31:00 UTC&quot; &quot;2017-10-01 22:32:00 UTC&quot;
-[3] &quot;2017-10-01 22:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 23:01:00 UTC&quot; &quot;2017-10-01 23:02:00 UTC&quot;
-[3] &quot;2017-10-01 23:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-01 23:31:00 UTC&quot; &quot;2017-10-01 23:32:00 UTC&quot;
-[3] &quot;2017-10-01 23:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 00:01:00 UTC&quot; &quot;2017-10-02 00:02:00 UTC&quot;
-[3] &quot;2017-10-02 00:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 00:31:00 UTC&quot; &quot;2017-10-02 00:32:00 UTC&quot;
-[3] &quot;2017-10-02 00:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 01:01:00 UTC&quot; &quot;2017-10-02 01:02:00 UTC&quot;
-[3] &quot;2017-10-02 01:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 01:31:00 UTC&quot; &quot;2017-10-02 01:32:00 UTC&quot;
-[3] &quot;2017-10-02 01:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 02:01:00 UTC&quot; &quot;2017-10-02 02:02:00 UTC&quot;
-[3] &quot;2017-10-02 02:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 02:31:00 UTC&quot; &quot;2017-10-02 02:32:00 UTC&quot;
-[3] &quot;2017-10-02 02:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 03:01:00 UTC&quot; &quot;2017-10-02 03:02:00 UTC&quot;
-[3] &quot;2017-10-02 03:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 03:31:00 UTC&quot; &quot;2017-10-02 03:32:00 UTC&quot;
-[3] &quot;2017-10-02 03:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 04:01:00 UTC&quot; &quot;2017-10-02 04:02:00 UTC&quot;
-[3] &quot;2017-10-02 04:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 04:31:00 UTC&quot; &quot;2017-10-02 04:32:00 UTC&quot;
-[3] &quot;2017-10-02 04:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 05:01:00 UTC&quot; &quot;2017-10-02 05:02:00 UTC&quot;
-[3] &quot;2017-10-02 05:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 05:31:00 UTC&quot; &quot;2017-10-02 05:32:00 UTC&quot;
-[3] &quot;2017-10-02 05:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 06:01:00 UTC&quot; &quot;2017-10-02 06:02:00 UTC&quot;
-[3] &quot;2017-10-02 06:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 06:31:00 UTC&quot; &quot;2017-10-02 06:32:00 UTC&quot;
-[3] &quot;2017-10-02 06:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 07:01:00 UTC&quot; &quot;2017-10-02 07:02:00 UTC&quot;
-[3] &quot;2017-10-02 07:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 07:31:00 UTC&quot; &quot;2017-10-02 07:32:00 UTC&quot;
-[3] &quot;2017-10-02 07:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 08:01:00 UTC&quot; &quot;2017-10-02 08:02:00 UTC&quot;
-[3] &quot;2017-10-02 08:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 08:31:00 UTC&quot; &quot;2017-10-02 08:32:00 UTC&quot;
-[3] &quot;2017-10-02 08:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 09:01:00 UTC&quot; &quot;2017-10-02 09:02:00 UTC&quot;
-[3] &quot;2017-10-02 09:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 09:31:00 UTC&quot; &quot;2017-10-02 09:32:00 UTC&quot;
-[3] &quot;2017-10-02 09:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 10:01:00 UTC&quot; &quot;2017-10-02 10:02:00 UTC&quot;
-[3] &quot;2017-10-02 10:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 10:31:00 UTC&quot; &quot;2017-10-02 10:32:00 UTC&quot;
-[3] &quot;2017-10-02 10:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 11:01:00 UTC&quot; &quot;2017-10-02 11:02:00 UTC&quot;
-[3] &quot;2017-10-02 11:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 11:31:00 UTC&quot; &quot;2017-10-02 11:32:00 UTC&quot;
-[3] &quot;2017-10-02 11:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 12:01:00 UTC&quot; &quot;2017-10-02 12:02:00 UTC&quot;
-[3] &quot;2017-10-02 12:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 12:31:00 UTC&quot; &quot;2017-10-02 12:32:00 UTC&quot;
-[3] &quot;2017-10-02 12:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 13:01:00 UTC&quot; &quot;2017-10-02 13:02:00 UTC&quot;
-[3] &quot;2017-10-02 13:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 13:31:00 UTC&quot; &quot;2017-10-02 13:32:00 UTC&quot;
-[3] &quot;2017-10-02 13:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 14:01:00 UTC&quot; &quot;2017-10-02 14:02:00 UTC&quot;
-[3] &quot;2017-10-02 14:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 14:31:00 UTC&quot; &quot;2017-10-02 14:32:00 UTC&quot;
-[3] &quot;2017-10-02 14:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 15:01:00 UTC&quot; &quot;2017-10-02 15:02:00 UTC&quot;
-[3] &quot;2017-10-02 15:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 15:31:00 UTC&quot; &quot;2017-10-02 15:32:00 UTC&quot;
-[3] &quot;2017-10-02 15:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 16:01:00 UTC&quot; &quot;2017-10-02 16:02:00 UTC&quot;
-[3] &quot;2017-10-02 16:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 16:31:00 UTC&quot; &quot;2017-10-02 16:32:00 UTC&quot;
-[3] &quot;2017-10-02 16:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 17:01:00 UTC&quot; &quot;2017-10-02 17:02:00 UTC&quot;
-[3] &quot;2017-10-02 17:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 17:31:00 UTC&quot; &quot;2017-10-02 17:32:00 UTC&quot;
-[3] &quot;2017-10-02 17:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 18:01:00 UTC&quot; &quot;2017-10-02 18:02:00 UTC&quot;
-[3] &quot;2017-10-02 18:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 18:31:00 UTC&quot; &quot;2017-10-02 18:32:00 UTC&quot;
-[3] &quot;2017-10-02 18:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 19:01:00 UTC&quot; &quot;2017-10-02 19:02:00 UTC&quot;
-[3] &quot;2017-10-02 19:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 19:31:00 UTC&quot; &quot;2017-10-02 19:32:00 UTC&quot;
-[3] &quot;2017-10-02 19:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 20:01:00 UTC&quot; &quot;2017-10-02 20:02:00 UTC&quot;
-[3] &quot;2017-10-02 20:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 20:31:00 UTC&quot; &quot;2017-10-02 20:32:00 UTC&quot;
-[3] &quot;2017-10-02 20:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 21:01:00 UTC&quot; &quot;2017-10-02 21:02:00 UTC&quot;
-[3] &quot;2017-10-02 21:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 21:31:00 UTC&quot; &quot;2017-10-02 21:32:00 UTC&quot;
-[3] &quot;2017-10-02 21:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 22:01:00 UTC&quot; &quot;2017-10-02 22:02:00 UTC&quot;
-[3] &quot;2017-10-02 22:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 22:31:00 UTC&quot; &quot;2017-10-02 22:32:00 UTC&quot;
-[3] &quot;2017-10-02 22:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 23:01:00 UTC&quot; &quot;2017-10-02 23:02:00 UTC&quot;
-[3] &quot;2017-10-02 23:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-02 23:31:00 UTC&quot; &quot;2017-10-02 23:32:00 UTC&quot;
-[3] &quot;2017-10-02 23:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 00:01:00 UTC&quot; &quot;2017-10-03 00:02:00 UTC&quot;
-[3] &quot;2017-10-03 00:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 00:31:00 UTC&quot; &quot;2017-10-03 00:32:00 UTC&quot;
-[3] &quot;2017-10-03 00:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 01:01:00 UTC&quot; &quot;2017-10-03 01:02:00 UTC&quot;
-[3] &quot;2017-10-03 01:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 01:31:00 UTC&quot; &quot;2017-10-03 01:32:00 UTC&quot;
-[3] &quot;2017-10-03 01:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 02:01:00 UTC&quot; &quot;2017-10-03 02:02:00 UTC&quot;
-[3] &quot;2017-10-03 02:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 02:31:00 UTC&quot; &quot;2017-10-03 02:32:00 UTC&quot;
-[3] &quot;2017-10-03 02:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 03:01:00 UTC&quot; &quot;2017-10-03 03:02:00 UTC&quot;
-[3] &quot;2017-10-03 03:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 03:31:00 UTC&quot; &quot;2017-10-03 03:32:00 UTC&quot;
-[3] &quot;2017-10-03 03:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 04:01:00 UTC&quot; &quot;2017-10-03 04:02:00 UTC&quot;
-[3] &quot;2017-10-03 04:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 04:31:00 UTC&quot; &quot;2017-10-03 04:32:00 UTC&quot;
-[3] &quot;2017-10-03 04:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 05:01:00 UTC&quot; &quot;2017-10-03 05:02:00 UTC&quot;
-[3] &quot;2017-10-03 05:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 05:31:00 UTC&quot; &quot;2017-10-03 05:32:00 UTC&quot;
-[3] &quot;2017-10-03 05:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 06:01:00 UTC&quot; &quot;2017-10-03 06:02:00 UTC&quot;
-[3] &quot;2017-10-03 06:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 06:31:00 UTC&quot; &quot;2017-10-03 06:32:00 UTC&quot;
-[3] &quot;2017-10-03 06:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 07:01:00 UTC&quot; &quot;2017-10-03 07:02:00 UTC&quot;
-[3] &quot;2017-10-03 07:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 07:31:00 UTC&quot; &quot;2017-10-03 07:32:00 UTC&quot;
-[3] &quot;2017-10-03 07:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 08:01:00 UTC&quot; &quot;2017-10-03 08:02:00 UTC&quot;
-[3] &quot;2017-10-03 08:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 08:31:00 UTC&quot; &quot;2017-10-03 08:32:00 UTC&quot;
-[3] &quot;2017-10-03 08:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 09:01:00 UTC&quot; &quot;2017-10-03 09:02:00 UTC&quot;
-[3] &quot;2017-10-03 09:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 09:31:00 UTC&quot; &quot;2017-10-03 09:32:00 UTC&quot;
-[3] &quot;2017-10-03 09:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 10:01:00 UTC&quot; &quot;2017-10-03 10:02:00 UTC&quot;
-[3] &quot;2017-10-03 10:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 10:31:00 UTC&quot; &quot;2017-10-03 10:32:00 UTC&quot;
-[3] &quot;2017-10-03 10:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 11:01:00 UTC&quot; &quot;2017-10-03 11:02:00 UTC&quot;
-[3] &quot;2017-10-03 11:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 11:31:00 UTC&quot; &quot;2017-10-03 11:32:00 UTC&quot;
-[3] &quot;2017-10-03 11:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 12:01:00 UTC&quot; &quot;2017-10-03 12:02:00 UTC&quot;
-[3] &quot;2017-10-03 12:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 12:31:00 UTC&quot; &quot;2017-10-03 12:32:00 UTC&quot;
-[3] &quot;2017-10-03 12:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 13:01:00 UTC&quot; &quot;2017-10-03 13:02:00 UTC&quot;
-[3] &quot;2017-10-03 13:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 13:31:00 UTC&quot; &quot;2017-10-03 13:32:00 UTC&quot;
-[3] &quot;2017-10-03 13:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 14:01:00 UTC&quot; &quot;2017-10-03 14:02:00 UTC&quot;
-[3] &quot;2017-10-03 14:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 14:31:00 UTC&quot; &quot;2017-10-03 14:32:00 UTC&quot;
-[3] &quot;2017-10-03 14:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 15:01:00 UTC&quot; &quot;2017-10-03 15:02:00 UTC&quot;
-[3] &quot;2017-10-03 15:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 15:31:00 UTC&quot; &quot;2017-10-03 15:32:00 UTC&quot;
-[3] &quot;2017-10-03 15:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 16:01:00 UTC&quot; &quot;2017-10-03 16:02:00 UTC&quot;
-[3] &quot;2017-10-03 16:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 16:31:00 UTC&quot; &quot;2017-10-03 16:32:00 UTC&quot;
-[3] &quot;2017-10-03 16:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 17:01:00 UTC&quot; &quot;2017-10-03 17:02:00 UTC&quot;
-[3] &quot;2017-10-03 17:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 17:31:00 UTC&quot; &quot;2017-10-03 17:32:00 UTC&quot;
-[3] &quot;2017-10-03 17:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 18:01:00 UTC&quot; &quot;2017-10-03 18:02:00 UTC&quot;
-[3] &quot;2017-10-03 18:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 18:31:00 UTC&quot; &quot;2017-10-03 18:32:00 UTC&quot;
-[3] &quot;2017-10-03 18:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 19:01:00 UTC&quot; &quot;2017-10-03 19:02:00 UTC&quot;
-[3] &quot;2017-10-03 19:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 19:31:00 UTC&quot; &quot;2017-10-03 19:32:00 UTC&quot;
-[3] &quot;2017-10-03 19:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 20:01:00 UTC&quot; &quot;2017-10-03 20:02:00 UTC&quot;
-[3] &quot;2017-10-03 20:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 20:31:00 UTC&quot; &quot;2017-10-03 20:32:00 UTC&quot;
-[3] &quot;2017-10-03 20:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 21:01:00 UTC&quot; &quot;2017-10-03 21:02:00 UTC&quot;
-[3] &quot;2017-10-03 21:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 21:31:00 UTC&quot; &quot;2017-10-03 21:32:00 UTC&quot;
-[3] &quot;2017-10-03 21:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 22:01:00 UTC&quot; &quot;2017-10-03 22:02:00 UTC&quot;
-[3] &quot;2017-10-03 22:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 22:31:00 UTC&quot; &quot;2017-10-03 22:32:00 UTC&quot;
-[3] &quot;2017-10-03 22:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 23:01:00 UTC&quot; &quot;2017-10-03 23:02:00 UTC&quot;
-[3] &quot;2017-10-03 23:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-03 23:31:00 UTC&quot; &quot;2017-10-03 23:32:00 UTC&quot;
-[3] &quot;2017-10-03 23:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 00:01:00 UTC&quot; &quot;2017-10-04 00:02:00 UTC&quot;
-[3] &quot;2017-10-04 00:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 00:31:00 UTC&quot; &quot;2017-10-04 00:32:00 UTC&quot;
-[3] &quot;2017-10-04 00:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 01:01:00 UTC&quot; &quot;2017-10-04 01:02:00 UTC&quot;
-[3] &quot;2017-10-04 01:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 01:31:00 UTC&quot; &quot;2017-10-04 01:32:00 UTC&quot;
-[3] &quot;2017-10-04 01:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 02:01:00 UTC&quot; &quot;2017-10-04 02:02:00 UTC&quot;
-[3] &quot;2017-10-04 02:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 02:31:00 UTC&quot; &quot;2017-10-04 02:32:00 UTC&quot;
-[3] &quot;2017-10-04 02:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 03:01:00 UTC&quot; &quot;2017-10-04 03:02:00 UTC&quot;
-[3] &quot;2017-10-04 03:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 03:31:00 UTC&quot; &quot;2017-10-04 03:32:00 UTC&quot;
-[3] &quot;2017-10-04 03:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 04:01:00 UTC&quot; &quot;2017-10-04 04:02:00 UTC&quot;
-[3] &quot;2017-10-04 04:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 04:31:00 UTC&quot; &quot;2017-10-04 04:32:00 UTC&quot;
-[3] &quot;2017-10-04 04:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 05:01:00 UTC&quot; &quot;2017-10-04 05:02:00 UTC&quot;
-[3] &quot;2017-10-04 05:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 05:31:00 UTC&quot; &quot;2017-10-04 05:32:00 UTC&quot;
-[3] &quot;2017-10-04 05:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 06:01:00 UTC&quot; &quot;2017-10-04 06:02:00 UTC&quot;
-[3] &quot;2017-10-04 06:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 06:31:00 UTC&quot; &quot;2017-10-04 06:32:00 UTC&quot;
-[3] &quot;2017-10-04 06:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 07:01:00 UTC&quot; &quot;2017-10-04 07:02:00 UTC&quot;
-[3] &quot;2017-10-04 07:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 07:31:00 UTC&quot; &quot;2017-10-04 07:32:00 UTC&quot;
-[3] &quot;2017-10-04 07:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 08:01:00 UTC&quot; &quot;2017-10-04 08:02:00 UTC&quot;
-[3] &quot;2017-10-04 08:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 08:31:00 UTC&quot; &quot;2017-10-04 08:32:00 UTC&quot;
-[3] &quot;2017-10-04 08:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 09:01:00 UTC&quot; &quot;2017-10-04 09:02:00 UTC&quot;
-[3] &quot;2017-10-04 09:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 09:31:00 UTC&quot; &quot;2017-10-04 09:32:00 UTC&quot;
-[3] &quot;2017-10-04 09:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 10:01:00 UTC&quot; &quot;2017-10-04 10:02:00 UTC&quot;
-[3] &quot;2017-10-04 10:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 10:31:00 UTC&quot; &quot;2017-10-04 10:32:00 UTC&quot;
-[3] &quot;2017-10-04 10:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 11:01:00 UTC&quot; &quot;2017-10-04 11:02:00 UTC&quot;
-[3] &quot;2017-10-04 11:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 11:31:00 UTC&quot; &quot;2017-10-04 11:32:00 UTC&quot;
-[3] &quot;2017-10-04 11:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 12:01:00 UTC&quot; &quot;2017-10-04 12:02:00 UTC&quot;
-[3] &quot;2017-10-04 12:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 12:31:00 UTC&quot; &quot;2017-10-04 12:32:00 UTC&quot;
-[3] &quot;2017-10-04 12:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 13:01:00 UTC&quot; &quot;2017-10-04 13:02:00 UTC&quot;
-[3] &quot;2017-10-04 13:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 13:31:00 UTC&quot; &quot;2017-10-04 13:32:00 UTC&quot;
-[3] &quot;2017-10-04 13:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 14:01:00 UTC&quot; &quot;2017-10-04 14:02:00 UTC&quot;
-[3] &quot;2017-10-04 14:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 14:31:00 UTC&quot; &quot;2017-10-04 14:32:00 UTC&quot;
-[3] &quot;2017-10-04 14:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 15:01:00 UTC&quot; &quot;2017-10-04 15:02:00 UTC&quot;
-[3] &quot;2017-10-04 15:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 15:31:00 UTC&quot; &quot;2017-10-04 15:32:00 UTC&quot;
-[3] &quot;2017-10-04 15:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 16:01:00 UTC&quot; &quot;2017-10-04 16:02:00 UTC&quot;
-[3] &quot;2017-10-04 16:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 16:31:00 UTC&quot; &quot;2017-10-04 16:32:00 UTC&quot;
-[3] &quot;2017-10-04 16:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 17:01:00 UTC&quot; &quot;2017-10-04 17:02:00 UTC&quot;
-[3] &quot;2017-10-04 17:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 17:31:00 UTC&quot; &quot;2017-10-04 17:32:00 UTC&quot;
-[3] &quot;2017-10-04 17:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 18:01:00 UTC&quot; &quot;2017-10-04 18:02:00 UTC&quot;
-[3] &quot;2017-10-04 18:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 18:31:00 UTC&quot; &quot;2017-10-04 18:32:00 UTC&quot;
-[3] &quot;2017-10-04 18:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 19:01:00 UTC&quot; &quot;2017-10-04 19:02:00 UTC&quot;
-[3] &quot;2017-10-04 19:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 19:31:00 UTC&quot; &quot;2017-10-04 19:32:00 UTC&quot;
-[3] &quot;2017-10-04 19:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 20:01:00 UTC&quot; &quot;2017-10-04 20:02:00 UTC&quot;
-[3] &quot;2017-10-04 20:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 20:31:00 UTC&quot; &quot;2017-10-04 20:32:00 UTC&quot;
-[3] &quot;2017-10-04 20:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 21:01:00 UTC&quot; &quot;2017-10-04 21:02:00 UTC&quot;
-[3] &quot;2017-10-04 21:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 21:31:00 UTC&quot; &quot;2017-10-04 21:32:00 UTC&quot;
-[3] &quot;2017-10-04 21:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 22:01:00 UTC&quot; &quot;2017-10-04 22:02:00 UTC&quot;
-[3] &quot;2017-10-04 22:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 22:31:00 UTC&quot; &quot;2017-10-04 22:32:00 UTC&quot;
-[3] &quot;2017-10-04 22:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 23:01:00 UTC&quot; &quot;2017-10-04 23:02:00 UTC&quot;
-[3] &quot;2017-10-04 23:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-04 23:31:00 UTC&quot; &quot;2017-10-04 23:32:00 UTC&quot;
-[3] &quot;2017-10-04 23:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 00:01:00 UTC&quot; &quot;2017-10-05 00:02:00 UTC&quot;
-[3] &quot;2017-10-05 00:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 00:31:00 UTC&quot; &quot;2017-10-05 00:32:00 UTC&quot;
-[3] &quot;2017-10-05 00:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 01:01:00 UTC&quot; &quot;2017-10-05 01:02:00 UTC&quot;
-[3] &quot;2017-10-05 01:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 01:31:00 UTC&quot; &quot;2017-10-05 01:32:00 UTC&quot;
-[3] &quot;2017-10-05 01:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 02:01:00 UTC&quot; &quot;2017-10-05 02:02:00 UTC&quot;
-[3] &quot;2017-10-05 02:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 02:31:00 UTC&quot; &quot;2017-10-05 02:32:00 UTC&quot;
-[3] &quot;2017-10-05 02:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 03:01:00 UTC&quot; &quot;2017-10-05 03:02:00 UTC&quot;
-[3] &quot;2017-10-05 03:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 03:31:00 UTC&quot; &quot;2017-10-05 03:32:00 UTC&quot;
-[3] &quot;2017-10-05 03:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 04:01:00 UTC&quot; &quot;2017-10-05 04:02:00 UTC&quot;
-[3] &quot;2017-10-05 04:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 04:31:00 UTC&quot; &quot;2017-10-05 04:32:00 UTC&quot;
-[3] &quot;2017-10-05 04:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 05:01:00 UTC&quot; &quot;2017-10-05 05:02:00 UTC&quot;
-[3] &quot;2017-10-05 05:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 05:31:00 UTC&quot; &quot;2017-10-05 05:32:00 UTC&quot;
-[3] &quot;2017-10-05 05:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 06:01:00 UTC&quot; &quot;2017-10-05 06:02:00 UTC&quot;
-[3] &quot;2017-10-05 06:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 06:31:00 UTC&quot; &quot;2017-10-05 06:32:00 UTC&quot;
-[3] &quot;2017-10-05 06:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 07:01:00 UTC&quot; &quot;2017-10-05 07:02:00 UTC&quot;
-[3] &quot;2017-10-05 07:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 07:31:00 UTC&quot; &quot;2017-10-05 07:32:00 UTC&quot;
-[3] &quot;2017-10-05 07:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 08:01:00 UTC&quot; &quot;2017-10-05 08:02:00 UTC&quot;
-[3] &quot;2017-10-05 08:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 08:31:00 UTC&quot; &quot;2017-10-05 08:32:00 UTC&quot;
-[3] &quot;2017-10-05 08:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 09:01:00 UTC&quot; &quot;2017-10-05 09:02:00 UTC&quot;
-[3] &quot;2017-10-05 09:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 09:31:00 UTC&quot; &quot;2017-10-05 09:32:00 UTC&quot;
-[3] &quot;2017-10-05 09:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 10:01:00 UTC&quot; &quot;2017-10-05 10:02:00 UTC&quot;
-[3] &quot;2017-10-05 10:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 10:31:00 UTC&quot; &quot;2017-10-05 10:32:00 UTC&quot;
-[3] &quot;2017-10-05 10:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 11:01:00 UTC&quot; &quot;2017-10-05 11:02:00 UTC&quot;
-[3] &quot;2017-10-05 11:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 11:31:00 UTC&quot; &quot;2017-10-05 11:32:00 UTC&quot;
-[3] &quot;2017-10-05 11:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 12:01:00 UTC&quot; &quot;2017-10-05 12:02:00 UTC&quot;
-[3] &quot;2017-10-05 12:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 12:31:00 UTC&quot; &quot;2017-10-05 12:32:00 UTC&quot;
-[3] &quot;2017-10-05 12:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 13:01:00 UTC&quot; &quot;2017-10-05 13:02:00 UTC&quot;
-[3] &quot;2017-10-05 13:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 13:31:00 UTC&quot; &quot;2017-10-05 13:32:00 UTC&quot;
-[3] &quot;2017-10-05 13:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 14:01:00 UTC&quot; &quot;2017-10-05 14:02:00 UTC&quot;
-[3] &quot;2017-10-05 14:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 14:31:00 UTC&quot; &quot;2017-10-05 14:32:00 UTC&quot;
-[3] &quot;2017-10-05 14:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 15:01:00 UTC&quot; &quot;2017-10-05 15:02:00 UTC&quot;
-[3] &quot;2017-10-05 15:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 15:31:00 UTC&quot; &quot;2017-10-05 15:32:00 UTC&quot;
-[3] &quot;2017-10-05 15:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 16:01:00 UTC&quot; &quot;2017-10-05 16:02:00 UTC&quot;
-[3] &quot;2017-10-05 16:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 16:31:00 UTC&quot; &quot;2017-10-05 16:32:00 UTC&quot;
-[3] &quot;2017-10-05 16:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 17:01:00 UTC&quot; &quot;2017-10-05 17:02:00 UTC&quot;
-[3] &quot;2017-10-05 17:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 17:31:00 UTC&quot; &quot;2017-10-05 17:32:00 UTC&quot;
-[3] &quot;2017-10-05 17:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 18:01:00 UTC&quot; &quot;2017-10-05 18:02:00 UTC&quot;
-[3] &quot;2017-10-05 18:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 18:31:00 UTC&quot; &quot;2017-10-05 18:32:00 UTC&quot;
-[3] &quot;2017-10-05 18:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 19:01:00 UTC&quot; &quot;2017-10-05 19:02:00 UTC&quot;
-[3] &quot;2017-10-05 19:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 19:31:00 UTC&quot; &quot;2017-10-05 19:32:00 UTC&quot;
-[3] &quot;2017-10-05 19:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 20:01:00 UTC&quot; &quot;2017-10-05 20:02:00 UTC&quot;
-[3] &quot;2017-10-05 20:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 20:31:00 UTC&quot; &quot;2017-10-05 20:32:00 UTC&quot;
-[3] &quot;2017-10-05 20:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 21:01:00 UTC&quot; &quot;2017-10-05 21:02:00 UTC&quot;
-[3] &quot;2017-10-05 21:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 21:31:00 UTC&quot; &quot;2017-10-05 21:32:00 UTC&quot;
-[3] &quot;2017-10-05 21:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 22:01:00 UTC&quot; &quot;2017-10-05 22:02:00 UTC&quot;
-[3] &quot;2017-10-05 22:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 22:31:00 UTC&quot; &quot;2017-10-05 22:32:00 UTC&quot;
-[3] &quot;2017-10-05 22:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 23:01:00 UTC&quot; &quot;2017-10-05 23:02:00 UTC&quot;
-[3] &quot;2017-10-05 23:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-05 23:31:00 UTC&quot; &quot;2017-10-05 23:32:00 UTC&quot;
-[3] &quot;2017-10-05 23:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 00:01:00 UTC&quot; &quot;2017-10-06 00:02:00 UTC&quot;
-[3] &quot;2017-10-06 00:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 00:31:00 UTC&quot; &quot;2017-10-06 00:32:00 UTC&quot;
-[3] &quot;2017-10-06 00:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 01:01:00 UTC&quot; &quot;2017-10-06 01:02:00 UTC&quot;
-[3] &quot;2017-10-06 01:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 01:31:00 UTC&quot; &quot;2017-10-06 01:32:00 UTC&quot;
-[3] &quot;2017-10-06 01:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 02:01:00 UTC&quot; &quot;2017-10-06 02:02:00 UTC&quot;
-[3] &quot;2017-10-06 02:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 02:31:00 UTC&quot; &quot;2017-10-06 02:32:00 UTC&quot;
-[3] &quot;2017-10-06 02:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 03:01:00 UTC&quot; &quot;2017-10-06 03:02:00 UTC&quot;
-[3] &quot;2017-10-06 03:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 03:31:00 UTC&quot; &quot;2017-10-06 03:32:00 UTC&quot;
-[3] &quot;2017-10-06 03:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 04:01:00 UTC&quot; &quot;2017-10-06 04:02:00 UTC&quot;
-[3] &quot;2017-10-06 04:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 04:31:00 UTC&quot; &quot;2017-10-06 04:32:00 UTC&quot;
-[3] &quot;2017-10-06 04:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 05:01:00 UTC&quot; &quot;2017-10-06 05:02:00 UTC&quot;
-[3] &quot;2017-10-06 05:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 05:31:00 UTC&quot; &quot;2017-10-06 05:32:00 UTC&quot;
-[3] &quot;2017-10-06 05:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 06:01:00 UTC&quot; &quot;2017-10-06 06:02:00 UTC&quot;
-[3] &quot;2017-10-06 06:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 06:31:00 UTC&quot; &quot;2017-10-06 06:32:00 UTC&quot;
-[3] &quot;2017-10-06 06:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 07:01:00 UTC&quot; &quot;2017-10-06 07:02:00 UTC&quot;
-[3] &quot;2017-10-06 07:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 07:31:00 UTC&quot; &quot;2017-10-06 07:32:00 UTC&quot;
-[3] &quot;2017-10-06 07:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 08:01:00 UTC&quot; &quot;2017-10-06 08:02:00 UTC&quot;
-[3] &quot;2017-10-06 08:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 08:31:00 UTC&quot; &quot;2017-10-06 08:32:00 UTC&quot;
-[3] &quot;2017-10-06 08:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 09:01:00 UTC&quot; &quot;2017-10-06 09:02:00 UTC&quot;
-[3] &quot;2017-10-06 09:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 09:31:00 UTC&quot; &quot;2017-10-06 09:32:00 UTC&quot;
-[3] &quot;2017-10-06 09:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 10:01:00 UTC&quot; &quot;2017-10-06 10:02:00 UTC&quot;
-[3] &quot;2017-10-06 10:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 10:31:00 UTC&quot; &quot;2017-10-06 10:32:00 UTC&quot;
-[3] &quot;2017-10-06 10:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 11:01:00 UTC&quot; &quot;2017-10-06 11:02:00 UTC&quot;
-[3] &quot;2017-10-06 11:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 11:31:00 UTC&quot; &quot;2017-10-06 11:32:00 UTC&quot;
-[3] &quot;2017-10-06 11:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 12:01:00 UTC&quot; &quot;2017-10-06 12:02:00 UTC&quot;
-[3] &quot;2017-10-06 12:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 12:31:00 UTC&quot; &quot;2017-10-06 12:32:00 UTC&quot;
-[3] &quot;2017-10-06 12:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 13:01:00 UTC&quot; &quot;2017-10-06 13:02:00 UTC&quot;
-[3] &quot;2017-10-06 13:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 13:31:00 UTC&quot; &quot;2017-10-06 13:32:00 UTC&quot;
-[3] &quot;2017-10-06 13:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 14:01:00 UTC&quot; &quot;2017-10-06 14:02:00 UTC&quot;
-[3] &quot;2017-10-06 14:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 14:31:00 UTC&quot; &quot;2017-10-06 14:32:00 UTC&quot;
-[3] &quot;2017-10-06 14:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 15:01:00 UTC&quot; &quot;2017-10-06 15:02:00 UTC&quot;
-[3] &quot;2017-10-06 15:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 15:31:00 UTC&quot; &quot;2017-10-06 15:32:00 UTC&quot;
-[3] &quot;2017-10-06 15:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 16:01:00 UTC&quot; &quot;2017-10-06 16:02:00 UTC&quot;
-[3] &quot;2017-10-06 16:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 16:31:00 UTC&quot; &quot;2017-10-06 16:32:00 UTC&quot;
-[3] &quot;2017-10-06 16:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 17:01:00 UTC&quot; &quot;2017-10-06 17:02:00 UTC&quot;
-[3] &quot;2017-10-06 17:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 17:31:00 UTC&quot; &quot;2017-10-06 17:32:00 UTC&quot;
-[3] &quot;2017-10-06 17:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 18:01:00 UTC&quot; &quot;2017-10-06 18:02:00 UTC&quot;
-[3] &quot;2017-10-06 18:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 18:31:00 UTC&quot; &quot;2017-10-06 18:32:00 UTC&quot;
-[3] &quot;2017-10-06 18:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 19:01:00 UTC&quot; &quot;2017-10-06 19:02:00 UTC&quot;
-[3] &quot;2017-10-06 19:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 19:31:00 UTC&quot; &quot;2017-10-06 19:32:00 UTC&quot;
-[3] &quot;2017-10-06 19:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 20:01:00 UTC&quot; &quot;2017-10-06 20:02:00 UTC&quot;
-[3] &quot;2017-10-06 20:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 20:31:00 UTC&quot; &quot;2017-10-06 20:32:00 UTC&quot;
-[3] &quot;2017-10-06 20:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 21:01:00 UTC&quot; &quot;2017-10-06 21:02:00 UTC&quot;
-[3] &quot;2017-10-06 21:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 21:31:00 UTC&quot; &quot;2017-10-06 21:32:00 UTC&quot;
-[3] &quot;2017-10-06 21:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 22:01:00 UTC&quot; &quot;2017-10-06 22:02:00 UTC&quot;
-[3] &quot;2017-10-06 22:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 22:31:00 UTC&quot; &quot;2017-10-06 22:32:00 UTC&quot;
-[3] &quot;2017-10-06 22:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 23:01:00 UTC&quot; &quot;2017-10-06 23:02:00 UTC&quot;
-[3] &quot;2017-10-06 23:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-06 23:31:00 UTC&quot; &quot;2017-10-06 23:32:00 UTC&quot;
-[3] &quot;2017-10-06 23:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 00:01:00 UTC&quot; &quot;2017-10-07 00:02:00 UTC&quot;
-[3] &quot;2017-10-07 00:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 00:31:00 UTC&quot; &quot;2017-10-07 00:32:00 UTC&quot;
-[3] &quot;2017-10-07 00:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 01:01:00 UTC&quot; &quot;2017-10-07 01:02:00 UTC&quot;
-[3] &quot;2017-10-07 01:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 01:31:00 UTC&quot; &quot;2017-10-07 01:32:00 UTC&quot;
-[3] &quot;2017-10-07 01:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 02:01:00 UTC&quot; &quot;2017-10-07 02:02:00 UTC&quot;
-[3] &quot;2017-10-07 02:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 02:31:00 UTC&quot; &quot;2017-10-07 02:32:00 UTC&quot;
-[3] &quot;2017-10-07 02:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 03:01:00 UTC&quot; &quot;2017-10-07 03:02:00 UTC&quot;
-[3] &quot;2017-10-07 03:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 03:31:00 UTC&quot; &quot;2017-10-07 03:32:00 UTC&quot;
-[3] &quot;2017-10-07 03:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 04:01:00 UTC&quot; &quot;2017-10-07 04:02:00 UTC&quot;
-[3] &quot;2017-10-07 04:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 04:31:00 UTC&quot; &quot;2017-10-07 04:32:00 UTC&quot;
-[3] &quot;2017-10-07 04:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 05:01:00 UTC&quot; &quot;2017-10-07 05:02:00 UTC&quot;
-[3] &quot;2017-10-07 05:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 05:31:00 UTC&quot; &quot;2017-10-07 05:32:00 UTC&quot;
-[3] &quot;2017-10-07 05:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 06:01:00 UTC&quot; &quot;2017-10-07 06:02:00 UTC&quot;
-[3] &quot;2017-10-07 06:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 06:31:00 UTC&quot; &quot;2017-10-07 06:32:00 UTC&quot;
-[3] &quot;2017-10-07 06:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 07:01:00 UTC&quot; &quot;2017-10-07 07:02:00 UTC&quot;
-[3] &quot;2017-10-07 07:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 07:31:00 UTC&quot; &quot;2017-10-07 07:32:00 UTC&quot;
-[3] &quot;2017-10-07 07:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 08:01:00 UTC&quot; &quot;2017-10-07 08:02:00 UTC&quot;
-[3] &quot;2017-10-07 08:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 08:31:00 UTC&quot; &quot;2017-10-07 08:32:00 UTC&quot;
-[3] &quot;2017-10-07 08:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 09:01:00 UTC&quot; &quot;2017-10-07 09:02:00 UTC&quot;
-[3] &quot;2017-10-07 09:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 09:31:00 UTC&quot; &quot;2017-10-07 09:32:00 UTC&quot;
-[3] &quot;2017-10-07 09:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 10:01:00 UTC&quot; &quot;2017-10-07 10:02:00 UTC&quot;
-[3] &quot;2017-10-07 10:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 10:31:00 UTC&quot; &quot;2017-10-07 10:32:00 UTC&quot;
-[3] &quot;2017-10-07 10:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 11:01:00 UTC&quot; &quot;2017-10-07 11:02:00 UTC&quot;
-[3] &quot;2017-10-07 11:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 11:31:00 UTC&quot; &quot;2017-10-07 11:32:00 UTC&quot;
-[3] &quot;2017-10-07 11:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 12:01:00 UTC&quot; &quot;2017-10-07 12:02:00 UTC&quot;
-[3] &quot;2017-10-07 12:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 12:31:00 UTC&quot; &quot;2017-10-07 12:32:00 UTC&quot;
-[3] &quot;2017-10-07 12:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 13:01:00 UTC&quot; &quot;2017-10-07 13:02:00 UTC&quot;
-[3] &quot;2017-10-07 13:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 13:31:00 UTC&quot; &quot;2017-10-07 13:32:00 UTC&quot;
-[3] &quot;2017-10-07 13:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 14:01:00 UTC&quot; &quot;2017-10-07 14:02:00 UTC&quot;
-[3] &quot;2017-10-07 14:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 14:31:00 UTC&quot; &quot;2017-10-07 14:32:00 UTC&quot;
-[3] &quot;2017-10-07 14:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 15:01:00 UTC&quot; &quot;2017-10-07 15:02:00 UTC&quot;
-[3] &quot;2017-10-07 15:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 15:31:00 UTC&quot; &quot;2017-10-07 15:32:00 UTC&quot;
-[3] &quot;2017-10-07 15:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 16:01:00 UTC&quot; &quot;2017-10-07 16:02:00 UTC&quot;
-[3] &quot;2017-10-07 16:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 16:31:00 UTC&quot; &quot;2017-10-07 16:32:00 UTC&quot;
-[3] &quot;2017-10-07 16:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 17:01:00 UTC&quot; &quot;2017-10-07 17:02:00 UTC&quot;
-[3] &quot;2017-10-07 17:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 17:31:00 UTC&quot; &quot;2017-10-07 17:32:00 UTC&quot;
-[3] &quot;2017-10-07 17:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 18:01:00 UTC&quot; &quot;2017-10-07 18:02:00 UTC&quot;
-[3] &quot;2017-10-07 18:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 18:31:00 UTC&quot; &quot;2017-10-07 18:32:00 UTC&quot;
-[3] &quot;2017-10-07 18:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 19:01:00 UTC&quot; &quot;2017-10-07 19:02:00 UTC&quot;
-[3] &quot;2017-10-07 19:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 19:31:00 UTC&quot; &quot;2017-10-07 19:32:00 UTC&quot;
-[3] &quot;2017-10-07 19:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 20:01:00 UTC&quot; &quot;2017-10-07 20:02:00 UTC&quot;
-[3] &quot;2017-10-07 20:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 20:31:00 UTC&quot; &quot;2017-10-07 20:32:00 UTC&quot;
-[3] &quot;2017-10-07 20:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 21:01:00 UTC&quot; &quot;2017-10-07 21:02:00 UTC&quot;
-[3] &quot;2017-10-07 21:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 21:31:00 UTC&quot; &quot;2017-10-07 21:32:00 UTC&quot;
-[3] &quot;2017-10-07 21:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 22:01:00 UTC&quot; &quot;2017-10-07 22:02:00 UTC&quot;
-[3] &quot;2017-10-07 22:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 22:31:00 UTC&quot; &quot;2017-10-07 22:32:00 UTC&quot;
-[3] &quot;2017-10-07 22:33:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 23:01:00 UTC&quot; &quot;2017-10-07 23:02:00 UTC&quot;
-[3] &quot;2017-10-07 23:03:00 UTC&quot;
-[1] &quot;Forecasts for &quot;
-[1] &quot;2017-10-07 23:31:00 UTC&quot; &quot;2017-10-07 23:32:00 UTC&quot;
-[3] &quot;2017-10-07 23:33:00 UTC&quot;</code></pre>
+<pre><code>[1] &quot;Models to estimate:  336&quot;</code></pre>
 <pre class="r"><code>  #results2&lt;-add_results(results2,res,&quot;naive&quot;,trainingSize,ta,forecastingSteps)
   
 res%&gt;%group_by(forecast_horizon,detector)%&gt;%summarise(mae=mae(actual,forecasted))%&gt;%
@@ -1717,9 +382,9 @@ res%&gt;%group_by(forecast_horizon,detector)%&gt;%summarise(mae=mae(actual,forec
 <pre><code># A tibble: 3 x 2
   forecast_horizon  mean
              &lt;int&gt; &lt;dbl&gt;
-1                1    NA
-2                2    NA
-3                3    NA</code></pre>
+1                1  5.67
+2                2  5.58
+3                3  5.59</code></pre>
 <pre class="r"><code># for (trainingMinute in trainingMinutes){
 #   trainingSize &lt;- trainingMinute/ta
 #   dat.restricted&lt;-mysample$data[(validationStart-trainingSize+1):validationEnd,]
@@ -1750,9 +415,9 @@ results%&gt;%filter(indicator==&quot;MAE&quot;)%&gt;%
 # Groups:   indicator, model [1]
   indicator model forecasting_horizon `480`
   &lt;chr&gt;     &lt;chr&gt;               &lt;dbl&gt; &lt;dbl&gt;
-1 MAE       naive                   1    NA
-2 MAE       naive                   2    NA
-3 MAE       naive                   3    NA</code></pre>
+1 MAE       naive                   1  5.67
+2 MAE       naive                   2  5.58
+3 MAE       naive                   3  5.59</code></pre>
 </div>
 </div>
 
