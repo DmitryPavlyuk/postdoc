@@ -1,0 +1,138 @@
+---
+title: "Sampling"
+author: "Dmitry Pavlyuk"
+date: "February 6, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+This markdown implements data sampling for several studies (EWGT-2019, MT-ITS-2019)
+
+```{r child = 'env.Rmd'}
+```
+
+Load necessary libraries
+----------------
+```{r libs}
+memory.limit(size=1024*128)
+library(needs)
+needs(tidyverse)
+needs(reshape2)
+needs(ggplot2)
+needs(geosphere)
+needs(igraph)
+source(file.path("R","prepare_data_functions.R"))
+```
+
+
+```{r sampling}
+
+sample.rds <- file.path(data.folder.prepared,"EWGT2019.rds")
+# Set up temporal aggregation
+ta <- 1 #minutes
+
+if (!file.exists(sample.rds)){
+  print("Preparing sample")
+  
+  # Read road network configuration
+  config.tibble <- readRDS(config.rds)
+  config.nodes <- CombineToNodes(config.tibble)
+  
+  # Calculate shortest distance between every pair of nodes
+  shortest.distances<-CalculateShortestDistances(config.nodes)
+  
+  # Weeks to be include into the research sample
+  weeks <- 1:40 #first 40 weeks of 2017; 30 for historical pattern learning, 10 - for model validation
+  
+  
+  # Research area is all nodes within 6 minutes of travel from an arbitrary selected central node (S567)
+  central.node<-config.nodes%>% filter(node_station_id=="S567")%>%select(node_name)%>%first%>%unlist
+  max.distance.time<-6
+  res<- GetNetwork(central.node,shortest.distances,max.distance.time)
+  
+  # Use traffic volume as the only characteristic of interest
+  series<-paste0(names(res),".volume")
+  
+  
+  # Read traffic data for selected nodes week by week
+  dat <- tibble()
+  for (b in weeks){
+    block.file <-file.path(data.folder.prepared, paste0(sprintf("%02d",b),"-",data.rds.file))
+    block <- readRDS(block.file)
+    cols <- intersect(colnames(block),series)
+    block <- block%>%select(datetime,cols)
+    dat<-bind_rows(dat,block)
+  }
+  
+  
+  # Aggregate data
+  dat <- dat%>%AggregateData(ta*2)
+  series<-colnames(dat%>%select(-datetime))
+  dat <- dat%>%mutate(dow=weekdays(datetime))%>%mutate(dow_time=paste(dow,format(datetime, "%H:%M")))
+  
+  # Prepare first 30 weeks for historical pattern learning
+  nhist <- 30*7*24*60/ta
+  historical.until <- dat[nhist,]$datetime
+  dat.historical <- dat%>%
+    filter(datetime<=historical.until)
+  #DropOrImpute(imputeLimit=impute.limit)
+  #series<-colnames(dat.historical%>%select(-datetime))
+  
+  # Estimate periodical component and outlier bounds using robust statistics (median and iqr)
+  outlier.alpha <- 0.05
+  dat.historical <- dat.historical%>%gather(series,key='node', value='value')%>%
+    group_by(node, dow_time) %>% summarise(s_m=median(value,na.rm = T),
+              s_lb=quantile(value, 0.25, na.rm = T) - (0.15/outlier.alpha)*iqr(value, na.rm = T),
+              s_ub=quantile(value, 0.75, na.rm = T) + (0.15/outlier.alpha)*iqr(value, na.rm = T))
+  
+  #series<-dat.historical%>%select(node)%>%pull
+  
+  #summary(dat.historical%>%select(dow_time,node,s_m)%>%spread(key = node, value = s_m))
+  #ggplot(dat.historical, aes(x = dow_time, y = s_m, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
+  
+  # Use weeks 31-40 for modelling
+  # Clean-up (drop missing nodes where number of missed values is higher than impute.limit and impute other missed values)
+  dat.training <- dat%>%filter(datetime>historical.until)%>%
+    DropOrImpute(imputeLimit=impute.limit)
+  
+  
+  # Exclude nodes with small variation in traffic volumes (errorneous, closed roads, etc.)
+  series <- colnames(dat.training%>%select(-datetime, -dow, -dow_time))
+  dat.training <- dat.training%>%gather(series,key='node', value='value')
+  series<-dat.training%>%group_by(node)%>%summarise(sd=sd(value))%>%filter(sd>0.1)%>%select(node)%>%pull
+  
+  dat.training <- dat.training%>%filter(node %in% series) %>% left_join(dat.historical, by=c("node"="node", "dow_time"="dow_time"))
+  
+  print(paste("Upper outliers", dat.training%>%filter(value>s_ub, s_ub>0)%>%nrow))
+  print(paste("Lower outliers", dat.training%>%filter(value<s_lb)%>%nrow))
+  
+  dat.training <- dat.training%>%
+    mutate(prepared=(ifelse(value<s_lb,s_lb,ifelse(value>s_ub, s_ub,value))-s_m))%>%
+    select(datetime,node,prepared)
+  
+  # Exclude nodes without variance in traffic
+  series <- dat.training%>%group_by(node)%>%summarise(sd=sd(prepared))%>%
+    filter(sd>0.1)%>%select(node)%>%pull
+  
+  # Exclude nodes with more than 4 hours without traffic
+  series <- dat.training%>%filter(node %in% series)%>%group_by(node)%>%
+    arrange(datetime)%>%summarise(m=MaxRle(prepared,0))%>%
+    filter(m<240)%>%select(node)%>%pull
+  
+  dat.training <-dat.training%>%filter(node %in% series)
+  res<-gsub(paste0(".volume"),"",series)
+  
+  #ggplot(dat.training, aes(x = prepared, col=node, group=node)) + geom_histogram()+facet_wrap( ~ node)
+  #ggplot(dat.training, aes(x = datetime, y = prepared, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
+  
+  mysample <-list(data=dat.training%>%spread(key = node, value = prepared),
+                  shortest.distances=shortest.distances[res,res])
+  
+  saveRDS(mysample,sample.rds)
+}else{
+  print("Sample exists - using saved")
+  mysample <- readRDS(sample.rds)
+}
+
+```

@@ -10,9 +10,6 @@ editor_options:
 This markdown document reproduces the research "Ensemble learning of the spatiotemporal structure of urban traffic
 flows", submitted to EURO Working Group on Transportation Meeting, EWGT 2019
 
-```{r child = 'env.Rmd'}
-```
-
 Load necessary libraries
 ----------------
 ```{r libs}
@@ -33,158 +30,44 @@ needs(doParallel)
 source(file.path("R","prepare_data_functions.R"))
 source(file.path("R","cv_functions.R"))
 source(file.path("R","cv_utils.R"))
-source(file.path("R","models.R"))
+source(file.path("R","models_util.R"))
+source(file.path("R","models_baseline.R"))
+source(file.path("R","models_spvar.R"))
 ```
 
 
-```{r sampling}
-
-sample.rds <- file.path(data.folder.prepared,"EWGT2019.rds")
-# Set up temporal aggregation
-ta <- 1 #minutes
-
-if (!file.exists(sample.rds)){
-  print("Preparing sample")
-  
-  # Read road network configuration
-  config.tibble <- readRDS(config.rds)
-  config.nodes <- CombineToNodes(config.tibble)
-  
-  # Calculate shortest distance between every pair of nodes
-  shortest.distances<-CalculateShortestDistances(config.nodes)
-  
-  # Weeks to be include into the research sample
-  weeks <- 1:40 #first 40 weeks of 2017; 30 for historical pattern learning, 10 - for model validation
-  
-  
-  # Research area is all nodes within 6 minutes of travel from an arbitrary selected central node (S567)
-  central.node<-config.nodes%>% filter(node_station_id=="S567")%>%select(node_name)%>%first%>%unlist
-  max.distance.time<-6
-  res<- GetNetwork(central.node,shortest.distances,max.distance.time)
-  
-  # Use traffic volume as the only characteristic of interest
-  series<-paste0(names(res),".volume")
-  
-  
-  # Read traffic data for selected nodes week by week
-  dat <- tibble()
-  for (b in weeks){
-    block.file <-file.path(data.folder.prepared, paste0(sprintf("%02d",b),"-",data.rds.file))
-    block <- readRDS(block.file)
-    cols <- intersect(colnames(block),series)
-    block <- block%>%select(datetime,cols)
-    dat<-bind_rows(dat,block)
-  }
-  
-  
-  # Aggregate data
-  dat <- dat%>%AggregateData(ta*2)
-  series<-colnames(dat%>%select(-datetime))
-  dat <- dat%>%mutate(dow=weekdays(datetime))%>%mutate(dow_time=paste(dow,format(datetime, "%H:%M")))
-  
-  # Prepare first 30 weeks for historical pattern learning
-  nhist <- 30*7*24*60/ta
-  historical.until <- dat[nhist,]$datetime
-  dat.historical <- dat%>%
-    filter(datetime<=historical.until)
-  #DropOrImpute(imputeLimit=impute.limit)
-  #series<-colnames(dat.historical%>%select(-datetime))
-  
-  # Estimate periodical component and outlier bounds using robust statistics (median and iqr)
-  outlier.alpha <- 0.05
-  dat.historical <- dat.historical%>%gather(series,key='node', value='value')%>%
-    group_by(node, dow_time) %>% summarise(s_m=median(value,na.rm = T),
-              s_lb=quantile(value, 0.25, na.rm = T) - (0.15/outlier.alpha)*iqr(value, na.rm = T),
-              s_ub=quantile(value, 0.75, na.rm = T) + (0.15/outlier.alpha)*iqr(value, na.rm = T))
-  
-  #series<-dat.historical%>%select(node)%>%pull
-  
-  #summary(dat.historical%>%select(dow_time,node,s_m)%>%spread(key = node, value = s_m))
-  #ggplot(dat.historical, aes(x = dow_time, y = s_m, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
-  
-  # Use weeks 31-40 for modelling
-  # Clean-up (drop missing nodes where number of missed values is higher than impute.limit and impute other missed values)
-  dat.training <- dat%>%filter(datetime>historical.until)%>%
-    DropOrImpute(imputeLimit=impute.limit)
-  
-  
-  # Exclude nodes with small variation in traffic volumes (errorneous, closed roads, etc.)
-  series <- colnames(dat.training%>%select(-datetime, -dow, -dow_time))
-  dat.training <- dat.training%>%gather(series,key='node', value='value')
-  series<-dat.training%>%group_by(node)%>%summarise(sd=sd(value))%>%filter(sd>0.1)%>%select(node)%>%pull
-  
-  dat.training <- dat.training%>%filter(node %in% series) %>% left_join(dat.historical, by=c("node"="node", "dow_time"="dow_time"))
-  
-  print(paste("Upper outliers", dat.training%>%filter(value>s_ub, s_ub>0)%>%nrow))
-  print(paste("Lower outliers", dat.training%>%filter(value<s_lb)%>%nrow))
-  
-  dat.training <- dat.training%>%
-    mutate(prepared=(ifelse(value<s_lb,s_lb,ifelse(value>s_ub, s_ub,value))-s_m))%>%
-    select(datetime,node,prepared)
-    
-  series <- dat.training%>%group_by(node)%>%summarise(sd=sd(prepared))%>%filter(sd>0.1)%>%select(node)%>%pull
-  dat.training <-dat.training%>%filter(node %in% series)
-  res<-gsub(paste0(".volume"),"",series)
-  
-  #ggplot(dat.training, aes(x = prepared, col=node, group=node)) + geom_histogram()+facet_wrap( ~ node)
-  #ggplot(dat.training, aes(x = datetime, y = prepared, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
-  
-  mysample <-list(data=dat.training%>%spread(key = node, value = prepared),
-                  shortest.distances=shortest.distances[res,res])
-  
-  saveRDS(mysample,sample.rds)
-}else{
-  print("Sample exists - using saved")
-  mysample <- readRDS(sample.rds)
-}
-
+```{r child = 'sampling.Rmd'}
 ```
-
 
 ```{r model}
 series <- colnames(mysample$data)[-1]
 print(paste("Number of series", length(series)))
 
-mysample$data%>%gather(series,key='node', value='value')%>%group_by(node)%>%
-    summarise(sd=sd(value))%>%filter(sd>0.1)%>%select(node)%>%pull
-
-
 trainingMinutes <- seq(480,480, by=120)
 validationSize <- 7*24*60/ta
 validationEnd <- nrow(mysample$data)
 validationStart <- validationEnd - validationSize
-forecastEvery<-30
+forecastEvery<-480
 forecastingSteps<-3 #12/ta
-
-# lagMatrix <- round(mysample$shortest.distances / ta)
-# lagMatrix[is.infinite(lagMatrix)]<-0
-# rownames(lagMatrix)<-paste0(rownames(lagMatrix),".volume")
-# colnames(lagMatrix)<-paste0(colnames(lagMatrix),".volume")
-# lagMatrix<-lagMatrix[as.vector(series),as.vector(series)]
-
-
 trainingSize <- trainingMinutes[1]/ta
+
+lagMatrix <- round(mysample$shortest.distances / ta)
+lagMatrix[is.infinite(lagMatrix)]<-0
+rownames(lagMatrix)<-paste0(rownames(lagMatrix),".volume")
+colnames(lagMatrix)<-paste0(colnames(lagMatrix),".volume")
+lagMatrix<-lagMatrix[as.vector(series),as.vector(series)]
+
 dat.restricted<-mysample$data[(validationStart-trainingSize+1):validationEnd,]
-base_params<-list(data=dat.restricted,
-                    seriesNames=series,
-                    forecastingSteps=forecastingSteps,
-                    forecastEvery=forecastEvery)
+base_params<-list(data=dat.restricted, seriesNames=series, forecastingSteps=forecastingSteps, forecastEvery=forecastEvery)
+params<-c(base_params,list(trainingWindowSize=trainingSize))
 
-  params<-c(base_params,list(trainingWindowSize=trainingSize))
-
-
- results<-tibble()
-# 
-   #res1<-do.call(movingWindow,c(params,list(xModel=xModel.naive)), envir=environment())
-   #results<-add_results(results,res1,"naive",trainingSize,ta,forecastingSteps)
-
-   
-   
+  results<-tibble()
   res<-do.call(rollingWindow,
                c(params,list(xModel=xModel.naive)),
                envir=environment())
   results<-bind_rows(results,res)
 
+  
   res<-do.call(rollingWindow,
                c(params,list(xModel=xModel.zero)),
                envir=environment())
@@ -208,53 +91,96 @@ base_params<-list(data=dat.restricted,
   
   
   res<-do.call(rollingWindow,
-               c(params,list(xModel=xModel.star,
-                             lagMatrix=NULL,matrixMode="CCF",
+               c(params,list(xModel=suf(xModel.star,"CCF"),matrixMode="CCF",
                              control=list(ccfThreshold=0.3),
-                             arLags=3,complete=F,include.mean=F, clusterNumber=2)),
+                             arLags=3,include.mean=F)),
                envir=environment())
   results<-bind_rows(results,res)
+  
+  res<-do.call(rollingWindow,
+               c(params,list(xModel=suf(xModel.star,"travelTime"),matrixMode="travelTime",
+                             control=list(lagMatrix=lagMatrix),
+                             arLags=3,include.mean=F)),
+               envir=environment())
+  results<-bind_rows(results,res)
+  
+  
+  source(file.path("R","cv_functions.R"))
+  source(file.path("R","models_spvar.R"))
+  
+  results<-tibble()
+  
+  
+  
+  
+  ccfThresholds <- c(0.3)#seq(0.1,0.9, by=0.8)
+  glassoRhos <- c(0.1, 0.3)#seq(0.1,0.9, by=0.8)
+  means <- c(F)
+  ar_orders <- c(1, 3)
+  
+  
+  file.remove("fs.rds")
+  
+  source(file.path("R","models_spvar.R"))
+  
+  source(file.path("R","cv_functions.R"))
+  
+  cvgrid <- expand.grid(glassoRho = glassoRhos, include.mean = means, arLags = ar_orders)
+  for (r in 1:nrow(cvgrid)){
+    cv <- cvgrid[r,]
+    print("Tunes parameters:")
+    print(cv)
+    res<-do.call(rollingWindow,
+               c(params,list(xModel=suf(xModel.star,"glasso"),matrixMode="glasso",
+                             control=list(glassoRho=cv$glassoRho),
+                             arLags=cv$arLags,include.mean=cv$include.mean,save_links_file="fs.rds")),
+               envir=environment())
+    results<-bind_rows(results,res%>%mutate(arLags=cv$arLags,
+                         include.mean=cv$include.mean,glassoRho=cv$glassoRho))
+  }
+  
+  cvgrid <- expand.grid(ccfThreshold=ccfThresholds, glassoRho = glassoRhos, 
+                        include.mean = means, arLags = ar_orders)
+  for (r in 1:nrow(cvgrid)){
+    cv <- cvgrid[r,]
+    print("Tunes parameters:")
+    print(cv)
+    res<-do.call(rollingWindow,
+               c(params,list(xModel=suf(xModel.star,"ensemble"),matrixMode=c("glasso","CCF", "travelTime"),
+                             control=list(glassoRho=cv$glassoRho,lagMatrix=lagMatrix,ccfThreshold=cv$ccfThreshold),
+                             arLags=cv$arLags,include.mean=cv$include.mean,save_links_file="fs.rds")),
+               envir=environment())
+    results<-bind_rows(results,res%>%mutate(arLags=cv$arLags,
+                         include.mean=cv$include.mean,glassoRho=cv$glassoRho,ccfThreshold=cv$ccfThreshold))
+  }
+  
+  cvSummary(results, mae, params=c('arLags','glassoRho','ccfThreshold','include.mean'))
+  winners <- cvSummary(results, mae, cumulative=T, params=c('arLags','glassoRho','ccfThreshold','include.mean'))%>%
+    filter(forecast_horizon==3)%>%
+    mutate(modelid=paste(gsub("STAR ","",model),arLags,glassoRho, ccfThreshold,include.mean))%>%
+    group_by(model)%>%filter(MAE==min(MAE))%>%ungroup%>%
+    select(modelid)%>%pull
+  cvSummary(results, mae, T)
+  cvSummary(results, mae)
+  
+  
   # 
-  # cl <- makeCluster(1)
-  #   registerDoParallel(cl)
-  # do.call({foreach (i = 1:2,.export=xModel.star$functions,
-  #                 .packages=xModel.star$packages) %dopar% print(constructCorMatrix())},
-  #         list(),
-  #         envir=environment()
-  # )
+  # needs(glasso)
+  # res<-do.call(xModel.star$run,list(sampl=dat.restricted[,series],
+  #                                   matrixMode=c("glasso","CCF", "travelTime"),
+  #                                   control=list(glassoRho=0.3,lagMatrix=lagMatrix,
+  #                                                ccfThreshold=0.1),
+  #                             arLags=3,include.mean=F,forecastingSteps=forecastingSteps,
+  #                             save_links_file="fs.rds"),
+  #               envir=environment())
+
+  fs.tib <- readRDS("fs.rds")
   
-source(file.path("R","models.R"))
-source(file.path("R","cv_functions.R"))
-results%>%group_by(model,forecast_horizon,detector)%>%summarise(mae=mae(actual,forecasted))%>%
-  group_by(model,forecast_horizon)%>%summarise(mean=mean(mae))
-
-
-  
-# for (trainingMinute in trainingMinutes){
-#   trainingSize <- trainingMinute/ta
-#   dat.restricted<-mysample$data[(validationStart-trainingSize+1):validationEnd,]
-#   base_params<-list(data=dat.restricted, 
-#                     seriesNames=series,
-#                     forecastingSteps=forecastingSteps, 
-#                     forecastEvery=forecastEvery)
-#   
-#   params<-c(base_params,list(trainingWindowSize=trainingSize))
-# 
-#   res<-do.call(movingWindow,
-#                c(params,list(xModel=xModel.naive)),
-#                envir=environment())
-#   results<-add_results(results,res,"naive",trainingSize,ta,forecastingSteps)
-# 
-#   res<-do.call(movingWindow,
-#                c(params,list(xModel=xModel.autoarima,
-#                              stationary=T, allowdrift =T, allowmean = T)),
-#                envir=environment())
-#   results<-add_results(results,res,"autoArima",trainingSize,ta,forecastingSteps)
-# }
-
-
-results%>%filter(indicator=="MAE")%>%
-  group_by(indicator,model,training_size,                                                                    forecasting_horizon)%>%
-  summarise(mean=mean(value))%>%spread(key=training_size, value=mean)%>%print(n=50)
-
+  fs.tib%>%filter(value==1)%>%
+    mutate(modelid=paste(fs,max_lag,glasso_rho, ccf_threshold,include_mean))%>%
+    filter(modelid %in% winners)%>%
+    mutate(last_date = as.POSIXct(last_date, "%Y-%m-%d %H:%M:%S",tz="GMT"))%>%
+    group_by(modelid,last_date)%>%
+    summarise(n=n())%>%arrange(modelid, last_date)%>%
+  ggplot(aes(x = last_date, y = n, col=modelid, group=modelid)) + geom_line()
 ```

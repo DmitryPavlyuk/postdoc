@@ -404,3 +404,9 @@ CalculateShortestDistances <-function(config.nodes){
   shA<-prepare_shortest_distances(allnodes,all.links,useTime=T)
   return(shA)
 }
+
+MaxRle <- function(x, val) {
+  y <- rle(x)
+  len <- y$lengths[y$value == val]
+  return(ifelse(length(len) > 0,max(len),NA))
+}
