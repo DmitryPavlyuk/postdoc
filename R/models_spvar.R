@@ -90,7 +90,8 @@ starForecast <-function(sampl, forecastingSteps, lagMatrix, arLags, matrixMode=N
       lck <- lock(paste0(save_links_file,".lock"), timeout = Inf)
       if (file.exists(save_links_file)) tib <- readRDS(save_links_file)
       tib <- bind_rows(tib, as_tibble(fixed, rownames="x") %>% gather(colnames(fixed), key="y", value="value")%>%
-                         mutate(fs=ifelse(length(matrixMode)>1,"ensemble",matrixMode),max_lag=arLags,
+                         mutate(fs=ifelse(length(matrixMode)>1,"ensemble",matrixMode),training_minutes=nrow(sampl),
+                                max_lag=arLags,
                                 include_mean=include.mean, last_date=last_date,
                                 glasso_rho=ifelse(is.null(control$glassoRho),NA, control$glassoRho),
                                 ccf_threshold=ifelse(is.null(control$ccfThreshold),NA, control$ccfThreshold)))

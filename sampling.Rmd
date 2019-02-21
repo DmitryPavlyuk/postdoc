@@ -9,14 +9,13 @@ editor_options:
 
 This markdown implements data sampling for several studies (EWGT-2019, MT-ITS-2019)
 
-```{r child = 'env.Rmd'}
-```
 
 Load necessary libraries
 ----------------
-```{r libs}
+```{r sampling_libs}
 memory.limit(size=1024*128)
 library(needs)
+needs(knitr)
 needs(tidyverse)
 needs(reshape2)
 needs(ggplot2)
@@ -25,6 +24,9 @@ needs(igraph)
 source(file.path("R","prepare_data_functions.R"))
 ```
 
+
+```{r child='env.Rmd'}
+```
 
 ```{r sampling}
 
