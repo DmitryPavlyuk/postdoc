@@ -10,6 +10,9 @@ editor_options:
 This markdown implements data sampling for several studies (EWGT-2019, MT-ITS-2019)
 
 
+```{r child='env.Rmd'}
+```
+
 Load necessary libraries
 ----------------
 ```{r sampling_libs}
@@ -24,9 +27,6 @@ needs(igraph)
 source(file.path("R","prepare_data_functions.R"))
 ```
 
-
-```{r child='env.Rmd'}
-```
 
 ```{r sampling}
 
@@ -67,6 +67,7 @@ if (!file.exists(sample.rds)){
     dat<-bind_rows(dat,block)
   }
   
+  #dat%>%select(datetime,rnd_87459.volume)%>%ggplot(aes(x = datetime, y = rnd_87459.volume)) + geom_line()+scale_x_datetime(labels = date_format("%H:%m"), date_breaks ="12 hours")
   
   # Aggregate data
   dat <- dat%>%AggregateData(ta*2)
@@ -80,13 +81,13 @@ if (!file.exists(sample.rds)){
     filter(datetime<=historical.until)
   #DropOrImpute(imputeLimit=impute.limit)
   #series<-colnames(dat.historical%>%select(-datetime))
-  
+  #dat.historical%>%select(datetime,rnd_87459.volume)%>%ggplot(aes(x = datetime, y = rnd_87459.volume)) + geom_line()+scale_x_datetime(labels = date_format("%H:%m"), date_breaks ="12 hours")
   # Estimate periodical component and outlier bounds using robust statistics (median and iqr)
-  outlier.alpha <- 0.05
+  outlier.alpha <- 0.01
   dat.historical <- dat.historical%>%gather(series,key='node', value='value')%>%
     group_by(node, dow_time) %>% summarise(s_m=median(value,na.rm = T),
-              s_lb=quantile(value, 0.25, na.rm = T) - (0.15/outlier.alpha)*iqr(value, na.rm = T),
-              s_ub=quantile(value, 0.75, na.rm = T) + (0.15/outlier.alpha)*iqr(value, na.rm = T))
+              s_lb=quantile(value, 0.25, na.rm = T) - (0.15/outlier.alpha)*IQR(value, na.rm = T),
+              s_ub=quantile(value, 0.75, na.rm = T) + (0.15/outlier.alpha)*IQR(value, na.rm = T))
   
   #series<-dat.historical%>%select(node)%>%pull
   
@@ -96,8 +97,8 @@ if (!file.exists(sample.rds)){
   # Use weeks 31-40 for modelling
   # Clean-up (drop missing nodes where number of missed values is higher than impute.limit and impute other missed values)
   dat.training <- dat%>%filter(datetime>historical.until)%>%
-    DropOrImpute(imputeLimit=impute.limit)
-  
+    DropOrImputeSimple(imputeLimit=impute.limit, verbose = T)
+  #summary(dat.training%>%select(dow_time,node,s_m)%>%spread(key = node, value = s_m))
   
   # Exclude nodes with small variation in traffic volumes (errorneous, closed roads, etc.)
   series <- colnames(dat.training%>%select(-datetime, -dow, -dow_time))
@@ -113,6 +114,7 @@ if (!file.exists(sample.rds)){
     mutate(prepared=(ifelse(value<s_lb,s_lb,ifelse(value>s_ub, s_ub,value))-s_m))%>%
     select(datetime,node,prepared)
   
+  #dat.training%>%filter(node=="rnd_95345.volume", datetime>"2017-07-31 06:55:00")%>%ggplot(aes(x = datetime, y = prepared, col=node, group=node)) + geom_line()+scale_x_datetime(labels = date_format("%H:%m"), date_breaks ="12 hours")
   # Exclude nodes without variance in traffic
   series <- dat.training%>%group_by(node)%>%summarise(sd=sd(prepared))%>%
     filter(sd>0.1)%>%select(node)%>%pull

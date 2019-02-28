@@ -86,17 +86,25 @@ starForecast <-function(sampl, forecastingSteps, lagMatrix, arLags, matrixMode=N
     }
     
     if (!is.null(save_links_file)){
-      tib <- tibble()
-      lck <- lock(paste0(save_links_file,".lock"), timeout = Inf)
-      if (file.exists(save_links_file)) tib <- readRDS(save_links_file)
-      tib <- bind_rows(tib, as_tibble(fixed, rownames="x") %>% gather(colnames(fixed), key="y", value="value")%>%
-                         mutate(fs=ifelse(length(matrixMode)>1,"ensemble",matrixMode),training_minutes=nrow(sampl),
-                                max_lag=arLags,
-                                include_mean=include.mean, last_date=last_date,
-                                glasso_rho=ifelse(is.null(control$glassoRho),NA, control$glassoRho),
-                                ccf_threshold=ifelse(is.null(control$ccfThreshold),NA, control$ccfThreshold)))
-      saveRDS(tib, save_links_file)
-      unlock(lck)
+      # tib <- tibble()
+      # lck <- lock(paste0(save_links_file,".lock"), timeout = Inf)
+      # if (file.exists(save_links_file)) tib <- readRDS(save_links_file)
+      # print(paste("Saving features",sum(fixed>0)))
+      # tib <- bind_rows(tib, as_tibble(fixed, rownames="x") %>% gather(colnames(fixed), key="y", value="value")%>%
+      #                    mutate(fs=ifelse(length(matrixMode)>1,"ensemble",matrixMode),training_minutes=nrow(sampl),
+      #                           max_lag=arLags,
+      #                           include_mean=include.mean, last_date=last_date,
+      #                           glasso_rho=ifelse(is.null(control$glassoRho),NA, control$glassoRho),
+      #                           ccf_threshold=ifelse(is.null(control$ccfThreshold),NA, control$ccfThreshold)))
+      # saveRDS(tib, save_links_file)
+      # unlock(lck)
+      saveRDS(as_tibble(fixed, rownames="x") %>% gather(colnames(fixed), key="y", value="value")%>%filter(value>0)%>%
+                                   mutate(fs=ifelse(length(matrixMode)>1,"ensemble",matrixMode),training_minutes=nrow(sampl),
+                                          max_lag=arLags,
+                                          include_mean=include.mean, last_date=last_date,
+                                          glasso_rho=ifelse(is.null(control$glassoRho),NA, control$glassoRho),
+                                          ccf_threshold=ifelse(is.null(control$ccfThreshold),NA, control$ccfThreshold)),
+              paste0(save_links_file,randomStr()))
     }
   }else{
     if(!complete){
@@ -197,6 +205,6 @@ univariateFixed <- function(data, series, maxLag=3, include.mean=F){
 xModel.star <- list(
   name="STAR",
   run = starForecast,
-  functions = c('prepareFixed','constructCorMatrix','univariateFixed','glassoFixed'),
+  functions = c('prepareFixed','constructCorMatrix','univariateFixed','glassoFixed','randomStr'),
   packages = c('tidyverse','matrixStats','tseries','e1071','MTS','glasso','filelock')
 )

@@ -10,6 +10,11 @@ editor_options:
 This markdown document reproduces the research "Ensemble learning of the spatiotemporal structure of urban traffic
 flows", submitted to EURO Working Group on Transportation Meeting, EWGT 2019
 
+
+```{r child='sampling.Rmd'}
+```
+
+
 Load necessary libraries
 ----------------
 ```{r libs}
@@ -27,6 +32,8 @@ needs(e1071)
 needs(MTS)
 needs(forecast)
 needs(doParallel)
+needs(glasso)
+needs(scales)
 
 source(file.path("R","prepare_data_functions.R"))
 source(file.path("R","cv_functions.R"))
@@ -35,11 +42,14 @@ source(file.path("R","models_util.R"))
 source(file.path("R","models_baseline.R"))
 source(file.path("R","models_spvar.R"))
 
+
+# Define files for intermediate results
+models.estimated.file <- "EWGT2019.models.estimated.rds"
+results.file <- "EWGT2019.results.rds"
+fs.file <- "EWGT2019.fs.rds"
+summary.file <- "EWGT2019.summary.rds"
 ```
 
-
-```{r child='sampling.Rmd'}
-```
 
 ```{r models}
 RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
@@ -264,16 +274,12 @@ lagMatrix<-lagMatrix[as.vector(series),as.vector(series)]
 # Define validation sample (10 weeks - 1 day at the beginning)
 validationSize <- nrow(mysample$data)-1*24*60/ta
 validationEnd <- nrow(mysample$data)
-forecastEvery<-20
+forecastEvery<-60*6
 forecastingSteps<-3
 
 # Do not save features - just search for optimal model specifications
 save.links.file <- NULL
 
-# Define files for intermediate results
-models.estimated.file <- "EWGT2019.models.estimated.rds"
-results.file <- "EWGT2019.results.rds"
-fs.file <- "fs.rds"
 
 
 
@@ -285,13 +291,13 @@ fs.file <- "fs.rds"
 # ccfThreshold<0.7 ineffective
 
 # Define a grid for tuning parameters
-ccfThresholds <- c(0.7,0.9)
-glassoRhos <- c(0.1, 0.3)
+ccfThresholds <- c(0.1, 0.3, 0.5)
+glassoRhos <- c(0.05, 0.1, 0.3)
 means <- c(F)
-ar_orders <- c(1, 3, 6)
+ar_orders <- c(1, 3)
 stationary <- c(F)
 allowdrift <- c(F)
-trainingMinutes <- c(720)
+trainingMinutes <- c(480)
 
 cvgrid <- expand.grid(trainingMinutes = trainingMinutes,
                         glassoRho = glassoRhos, ccfThreshold=ccfThresholds, 
@@ -304,31 +310,34 @@ RunModels(mysample$data, series, ta, forecastingSteps, forecastEvery,
                       validationSize, validationEnd, 
                       lagMatrix, cvgrid, 
                       models.estimated.file, results.file,save.links.file)
+# Choose models with optimal sets of tuned parameters for arLargs=3
+params <- c('trainingMinutes','allowdrift','stationary','arLags','glassoRho','ccfThreshold','include.mean')
 
 # Read estimation results
 results <- readRDS(results.file)
 models.estimated <- readRDS(models.estimated.file)
-
-
-# Choose models with optimal sets of tuned parameters
-params <- c('trainingMinutes','allowdrift','stationary','arLags','glassoRho','ccfThreshold','include.mean')
-winners <- cvSummary(results, mae, cumulative=T, params=params)%>%
-    filter(forecast_horizon==3)%>%
+s<-cvSummary(results, mae, cumulative=T, params=params)%>%
     mutate(modelid=paste(model,trainingMinutes, arLags,glassoRho, ccfThreshold,include.mean,stationary,allowdrift))%>%
-    mutate(modelid=gsub(" NA","",modelid))%>%
+    mutate(modelid=gsub(" NA","",modelid))
+saveRDS(s, summary.file)
+
+
+
+winners3 <- s%>%
+    filter(forecast_horizon==3,arLags==3)%>%
     group_by(model)%>%filter(MAE==min(MAE))%>%ungroup
-  
 
 # Re-estimate best model specification, saving features on every step
-  reestimate.ids <- winners%>%
+  reestimate.ids <- winners3%>%
     filter(model %in% c("STAR ccf", "STAR glasso", "STAR ensemble", "STAR travelTime"))%>%select(modelid)%>%pull
 
-  save.links.file <- fs.file
+  save.links.file <- file.path("fs", fs.file)
   tmp.models.estimated.file <- "tmp.EWGT2019.models.estimated.rds"
   tmp.results.file <- "tmp.EWGT2019.results.rds"
   if (file.exists(save.links.file)) file.remove(save.links.file)
   saveRDS(models.estimated[! models.estimated %in% reestimate.ids], tmp.models.estimated.file)
   if (file.exists(tmp.results.file)) file.remove(tmp.results.file)
+  
   
   RunModels(mysample$data, series, ta, forecastingSteps, forecastEvery,
                       validationSize, validationEnd, 
@@ -336,31 +345,118 @@ winners <- cvSummary(results, mae, cumulative=T, params=params)%>%
                       tmp.models.estimated.file, tmp.results.file,save.links.file)
   
   
+  # Combine features from individual models
+  fs.tib <- tibble()
+  ls <- list.files(path="fs")
+  cou<-0
+  for (i in ls){
+    rf <- readRDS(file.path("fs", i))
+    pars<- rf%>%first%>%select(training_minutes,max_lag)
+    #if (pars$max_lag==3){
+      cou<-cou+1
+      fs.tib<-bind_rows(fs.tib,rf)
+       print(cou)
+      # if (cou %% 6 == 0){
+      #   saveRDS(fs.tib, file.path("fs4",paste0("fs.rds", cou)))
+      #   fs.tib <- tibble()
+      # }
+    #}
+  }
+  if (nrow(fs.tib)>0) saveRDS(fs.tib, fs.file)
+  
+  fs.tib<-fs.tib%>%mutate(modelid=paste(ifelse(fs=="CCF","ccf",fs),training_minutes,max_lag,glasso_rho, ccf_threshold,include_mean))%>%
+    mutate(last_date = as.POSIXct(last_date, "%Y-%m-%d %H:%M:%S",tz="GMT"))%>%
+    mutate(modelid=gsub(" NA","",modelid))
+  saveRDS(fs.tib, fs.file)
+  
 ```
 
 ```{r results}
 
-results <- readRDS(results.file)
 fs.tib <- readRDS(fs.file)
+results <- readRDS(results.file)
 
 params <- c('trainingMinutes','allowdrift','stationary','arLags','glassoRho','ccfThreshold','include.mean')
-winners <- cvSummary(results, mae, cumulative=T, params=params)%>%
-    filter(forecast_horizon==3)%>%
+if (file.exists(summary.file)){
+  s <- readRDS(summary.file)
+} else {
+  s <- cvSummary(results, mae, cumulative=T, params=params)%>%
     mutate(modelid=paste(model,trainingMinutes, arLags,glassoRho, ccfThreshold,include.mean,stationary,allowdrift))%>%
-    mutate(modelid=gsub(" NA","",modelid))%>%
+    mutate(modelid=gsub(" NA","",modelid))
+  saveRDS(s, summary.file)
+}
+
+
+winners <- s%>%
+    filter(forecast_horizon==3)%>%
+    group_by(model)%>%filter(MAE==min(MAE))%>%ungroup
+
+winners <- s%>%
+    filter(forecast_horizon==3, arLags == 3)%>%
     group_by(model)%>%filter(MAE==min(MAE))%>%ungroup
 
 star.models <- winners%>%
-    filter(model %in% c("STAR ccf", "STAR glasso", "STAR ensemble", "STAR travelTime"))%>%select(modelid)%>%pull
+    filter(model %in% c("STAR ccf", "STAR glasso", "STAR ensemble", "STAR travelTime"))%>%
+  select(modelid)%>%pull
+#star.models <- c(star.models, "STAR glasso 720 3 0.3 FALSE")
+#cvSummary(results, mae, params=params, cumulative = T)%>%filter(forecast_horizon==3)%>%arrange(MAE)%>%print(n=100)
 
-cvSummary(results, mae, params=params, cumulative = T)%>%filter(forecast_horizon==3)%>%arrange(MAE)%>%print(n=100)
-
-  fs.tib%>%filter(value==1)%>%
-    mutate(modelid=paste(ifelse(fs=="CCF","ccf",fs),training_minutes,max_lag,glasso_rho, ccf_threshold,include_mean))%>%
-    mutate(modelid=gsub(" NA","",modelid))%>%
-    filter(modelid %in% gsub("STAR ","",star.models))%>%
-    mutate(last_date = as.POSIXct(last_date, "%Y-%m-%d %H:%M:%S",tz="GMT"))%>%
+  fs.tib%>%filter(value>0)%>%filter(modelid %in% gsub("STAR ","",star.models))%>%
     group_by(modelid,last_date)%>%
     summarise(n=n())%>%arrange(modelid, last_date)%>%
-  ggplot(aes(x = last_date, y = n, col=modelid, group=modelid)) + geom_line()
+    ggplot(aes(x = last_date, y = n, col=modelid, group=modelid)) + geom_line()
+  
+  fmt<-"%H:%M:%S"
+ fs.tib%>%filter(value>0)%>%filter(modelid %in% gsub("STAR ","",star.models))%>%
+    group_by(modelid,last_date)%>%
+    summarise(n=n())%>%
+    mutate(last_date_d = format(last_date, format=fmt,tz="GMT"))%>%
+    group_by(modelid,last_date_d)%>%
+    summarise(mn=mean(n), ld=last(last_date))%>%
+    ggplot(aes(x = ld, y = mn, col=modelid, group=modelid)) + geom_line()+scale_x_datetime(labels = date_format(fmt), date_breaks = "3 hours")
+
+
+ g <- c('model',params) 
+ tmp<-results%>%
+      group_by(model_hash,detector)%>%
+      arrange(model_hash,detector,forecast_horizon)%>%
+      mutate(cumactual=cumsum(actual),cumforecasted=cumsum(forecasted))
+ 
+ saveRDS(tmp, "EWGT2019.results-cum.rds")
+ 
+ tmp1<-tmp%>%
+  group_by(.dots=c(g,'forecast_horizon','detector', 'datetime'))%>%
+  summarise(v=mae(cumactual,cumforecasted))%>%mutate(modelid=gsub(" NA","",paste(model,trainingMinutes, arLags,glassoRho, ccfThreshold,include.mean,stationary,allowdrift)))
+ 
+  gtmp<-tmp1%>%filter(forecast_horizon==3)%>%group_by(modelid,datetime)%>%
+    summarise(mn=mean(v))
+  
+  needs(stringr)
+  m<- winners%>%select(modelid)%>%pull
+  m<-winners%>%select(modelid)%>%filter(str_detect(modelid,"^STAR") )%>%pull
+  m <- c("STAR ccf 480 3 0.7 FALSE","STAR glasso 480 1 0.3 FALSE","STAR ensemble 480 3 0.1 0.7 FALSE","STAR travelTime 480 3 FALSE")
+  m <- c("STAR ensemble 480 3 0.1 0.7 FALSE")
+  
+  gtmp%>%filter(modelid %in% m)%>%
+    ggplot(aes(x = datetime, y = mn, col=modelid, group=modelid)) + geom_line()+scale_x_datetime(labels = date_format(fmt), date_breaks = "1 day")
+  
+  # gtmp%>%filter(modelid %in% m)%>%filter(mn>50)
+  # tmp1%>%filter(forecast_horizon==3,modelid=="STAR ensemble 480 3 0.1 0.7 FALSE",
+  #               last_date=="2017-07-31 07:00:00", v>100)%>%select(detector,last_date,v)
+  # # Problem rnd_86469.volume 2017-07-31 04:00:00 2149
+  # tm<-tmp%>%filter(detector=="rnd_86469.volume", forecast_horizon==3)
+  # tm1<-tm%>%filter(datetime==as.POSIXct("2017-07-31 04:03:00", format="%Y-%m-%d %H:%M:%S",tz="GMT"))
+  # # Problems max rnd_95345.volume  rnd_87459.volume rnd_85591.volume rnd_172.volume
+  # mysample$data%>%select(datetime, rnd_95345.volume)%>%ggplot(aes(x = datetime, y = rnd_95345.volume)) + geom_line()+scale_x_datetime(labels = date_format(fmt), date_breaks ="3 hours")
+                                                                                                
+                                                                                                
+  gtmp%>%filter(modelid %in% m)%>%mutate(last_date_d = format(datetime, format=fmt,tz="GMT"))%>%
+    group_by(modelid,last_date_d)%>%
+    summarise(meann=median(mn), ld=last(datetime))%>%
+    ggplot(aes(x = ld, y = meann, col=modelid, group=modelid)) + geom_line()+scale_x_datetime(labels = date_format(fmt), date_breaks = "3 hours")
+  
+  
+  
+  gtmp%>%filter(modelid %in% m)%>%group_by(modelid)%>%summarise(mean=mean(mn), sd=sd(mn))
+      
 ```

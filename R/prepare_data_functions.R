@@ -64,16 +64,23 @@ load_detector_data <- function(detector_name, folder, verbose=F){
   if (!is.na(detector_name) & length(detector_name)>0){
     #    print(paste("Loading", detector_name))
     vFile <-paste0(folder,"\\",detector_name,".v30")[1]
+    bad.vales<-c()
     if (file.exists(vFile)){
-      res[[paste0(detector_name,"_volume")]] <- 
-        readBin(vFile, what="int", size=1, signed=F, n=n)
+      r<-readBin(vFile, what="int", size=1, signed=T, n=n)
+      bad.values <- which(r>40 | r<0 |is.nan(r))
+      r[bad.values]<-NA
+      res[[paste0(detector_name,"_volume")]] <- r
     }else{
       if (verbose) warning(paste("No volume file for detector", detector_name))
     }
     cFile <- paste0(folder,"\\",detector_name,".c30")[1]
     if (file.exists(cFile)){
-      res[[paste0(detector_name,"_occupancy")]] <- 
-        readBin(cFile, what="int", size=2, signed=F, n=n,endian = "big")
+      r<-readBin(cFile, what="int", size=2, signed=T, n=n,endian = "big")
+      r[bad.values]<-NA
+      r[is.nan(r)]<-NA
+      r[r>1000]<-NA
+      r[r<0]<-NA
+      res[[paste0(detector_name,"_occupancy")]] <- r
     }else{
       if (verbose) warning(paste("No occupancy file for detector", detector_name))
     }
@@ -98,6 +105,7 @@ combine_detectors<-function(data,detector_data){
           mutate(volume=rowSums(.))%>%select(volume),
         tib %>% select(matches("_occupancy")) %>% 
           mutate(occupancy=rowSums(.)/(ncol(.)*18)) %>% 
+          mutate(occupancy=ifelse(is.nan(occupancy),NA,occupancy))%>%
           select(occupancy))
     }
   }
@@ -146,7 +154,7 @@ load_csv_data <- function(csv_path, startdate, days, verbose=F){
   for (day in as.character(seq(as.Date(startdate, format="%Y%m%d"), by = "day", length.out = days))){
     datadate <- gsub('-','',day)
     if (verbose) print(paste("Reading and merging data for ", day))
-    x <- read_csv(file.path(csv_path,paste0(datadate,".csv")),col_types = cols(.default = "d", datetime="?"))
+    x <- read_csv(file.path(csv_path,paste0(datadate,".csv")),col_types = cols(.default = "d", datetime="?"),na = "NA")
     res<-bind_rows(res,x)
   }
   return(res)
@@ -313,6 +321,23 @@ DropOrImpute <- function(tib, imputeLimit=0.05,verbose=F){
       
       if (verbose) print(paste("Imputing ",nodeOccupancy,"- missing ratio",distr.na[nodeOccupancy]))
       res[[nodeOccupancy]]<-na.interpolation(c(res[[nodeOccupancy]]))
+    }
+  }
+  return(res)
+}
+
+
+DropOrImputeSimple <- function(tib, imputeLimit=0.05,verbose=F){
+  res<-tib
+  distr.na<-sapply(tib, function(x) mean(is.na(x)))
+  ns<-names(distr.na[distr.na>0])
+  for(node in ns){
+    if(is.na(distr.na[node]) || distr.na[node]>imputeLimit){
+      if (verbose) print(paste("Dropping ",node,"- missing ratio",distr.na[node]))
+      if (node %in% colnames(res)) res<-res%>%select(-c(node))
+    }else{
+      if (verbose) print(paste("Imputing ",node,"- missing ratio",distr.na[node]))
+      res[[node]]<-na.interpolation(c(res[[node]]))
     }
   }
   return(res)
