@@ -131,7 +131,9 @@ if (!file.exists(sample.rds)){
   #ggplot(dat.training, aes(x = datetime, y = prepared, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
   
   mysample <-list(data=dat.training%>%spread(key = node, value = prepared),
-                  shortest.distances=shortest.distances[res,res])
+                  shortest.distances=shortest.distances[res,res],
+                  links=load_all_links(config.nodes),
+                  config.nodes = config.nodes%>%filter(node_name %in% res))
   
   saveRDS(mysample,sample.rds)
 }else{

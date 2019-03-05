@@ -206,5 +206,5 @@ xModel.star <- list(
   name="STAR",
   run = starForecast,
   functions = c('prepareFixed','constructCorMatrix','univariateFixed','glassoFixed','randomStr'),
-  packages = c('tidyverse','matrixStats','tseries','e1071','MTS','glasso','filelock')
+  packages = c('tidyverse','matrixStats','tseries','e1071','MTS','glasso')
 )

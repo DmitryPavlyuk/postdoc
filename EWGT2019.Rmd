@@ -34,6 +34,7 @@ needs(forecast)
 needs(doParallel)
 needs(glasso)
 needs(scales)
+needs(stringr)
 
 source(file.path("R","prepare_data_functions.R"))
 source(file.path("R","cv_functions.R"))
@@ -274,7 +275,7 @@ lagMatrix<-lagMatrix[as.vector(series),as.vector(series)]
 # Define validation sample (10 weeks - 1 day at the beginning)
 validationSize <- nrow(mysample$data)-1*24*60/ta
 validationEnd <- nrow(mysample$data)
-forecastEvery<-60*6
+forecastEvery<-20
 forecastingSteps<-3
 
 # Do not save features - just search for optimal model specifications
@@ -347,21 +348,22 @@ winners3 <- s%>%
   
   # Combine features from individual models
   fs.tib <- tibble()
-  ls <- list.files(path="fs")
+  ls <- list.files(path="fs100")
   cou<-0
   for (i in ls){
-    rf <- readRDS(file.path("fs", i))
+    rf <- readRDS(file.path("fs100", i))
     pars<- rf%>%first%>%select(training_minutes,max_lag)
     #if (pars$max_lag==3){
       cou<-cou+1
       fs.tib<-bind_rows(fs.tib,rf)
        print(cou)
-      # if (cou %% 6 == 0){
-      #   saveRDS(fs.tib, file.path("fs4",paste0("fs.rds", cou)))
-      #   fs.tib <- tibble()
+      # if (cou %% 100 == 0){
+      #    saveRDS(fs.tib, file.path("fs100",paste0("fs.rds", cou)))
+      #    fs.tib <- tibble()
       # }
     #}
   }
+  #if (nrow(fs.tib)>0) saveRDS(fs.tib, file.path("fs100",paste0("fs.rds", cou)))
   if (nrow(fs.tib)>0) saveRDS(fs.tib, fs.file)
   
   fs.tib<-fs.tib%>%mutate(modelid=paste(ifelse(fs=="CCF","ccf",fs),training_minutes,max_lag,glasso_rho, ccf_threshold,include_mean))%>%
@@ -371,92 +373,157 @@ winners3 <- s%>%
   
 ```
 
+```{r draw_graph}
+
+series <- colnames(mysample$data)[-1]
+res<-find_paths(gsub(".volume","",series), mysample$links)
+df <- res%>%left_join(mysample$config.nodes, by=c("from"="node_name"), suffix=c(".from", ".to"))%>%left_join(mysample$config.nodes, by=c("to"="node_name"), suffix=c(".from", ".to"))%>%
+  select(from, to, distance,time,startx=node_lon.from,starty=node_lat.from,endx=node_lon.to,endy=node_lat.to)
+write.csv(df,"EWGT2019.links.csv", row.names = F)
+write.csv(mysample$config.nodes,"EWGT2019.nodes.csv", row.names = F)
+
+```
+
 ```{r results}
 
+# Load experimental results
 fs.tib <- readRDS(fs.file)
 results <- readRDS(results.file)
 
+source(file.path("R","cv_functions.R"))
+
 params <- c('trainingMinutes','allowdrift','stationary','arLags','glassoRho','ccfThreshold','include.mean')
+
+# Load summary statistics (or calcuklate them if files are absent)
 if (file.exists(summary.file)){
   s <- readRDS(summary.file)
 } else {
-  s <- cvSummary(results, mae, cumulative=T, params=params)%>%
-    mutate(modelid=paste(model,trainingMinutes, arLags,glassoRho, ccfThreshold,include.mean,stationary,allowdrift))%>%
-    mutate(modelid=gsub(" NA","",modelid))
+  s.mae<-cvSummary(results, mae, cumulative=T, params=params)
+  s.rmse<-cvSummary(results, rmse, cumulative=T, params=params)
+  s.mase<-cvSummary(results, mase, cumulative=T, params=params)
+  
+  s.mae<-s.mae%>%mutate(modelid=paste(model,trainingMinutes, arLags,glassoRho, ccfThreshold,include.mean,stationary,allowdrift))%>%mutate(modelid=gsub(" NA","",modelid))
+  s.rmse<-s.rmse%>%mutate(modelid=paste(model,trainingMinutes, arLags,glassoRho, ccfThreshold,include.mean,stationary,allowdrift))%>%mutate(modelid=gsub(" NA","",modelid))
+  s.mase<-s.mase%>%mutate(modelid=paste(model,trainingMinutes, arLags,glassoRho, ccfThreshold,include.mean,stationary,allowdrift))%>%mutate(modelid=gsub(" NA","",modelid)) 
+  s<-list(s.mae=s.mae, s.rmse=s.rmse,s.mase=s.mase)
+  # Save summary statistics for further usage
+  write.csv(s$s.mae%>%select(-q95)%>%spread(key=forecast_horizon,value=MAE)%>%group_by(model)%>%filter(`3`==min(`3`))%>%arrange(`3`), "EWGT2019.mae.csv")
+  write.csv(s2%>%select(-q95)%>%spread(key=forecast_horizon,value=RMSE)%>%group_by(model)%>%filter(`3`==min(`3`))%>%arrange(`3`), "EWGT2019.rmse.csv")
   saveRDS(s, summary.file)
 }
 
+# Choose best models of a kind
+winners <- s$s.mae%>%filter(forecast_horizon==3, arLags == 3)%>%group_by(model)%>%filter(MAE==min(MAE))%>%ungroup
+star.models <- winners%>%filter(model %in% c("STAR ccf", "STAR glasso", "STAR ensemble", "STAR travelTime"))%>%select(modelid)%>%pull
 
-winners <- s%>%
-    filter(forecast_horizon==3)%>%
-    group_by(model)%>%filter(MAE==min(MAE))%>%ungroup
+# Filter and rename models for presentation purposes
+fs.tib.filtered <- fs.tib%>%filter(value>0)%>%filter(modelid %in% gsub("STAR ","",star.models))%>%
+    mutate(maxn=ncol(mysample$data))%>%mutate(maxn=ifelse(str_detect(modelid,"^glasso"),3*maxn*maxn,maxn*(3+maxn)))%>%
+    mutate(modelid=ifelse(str_detect(modelid,"^ccf"),"Cross-correlation filtering",modelid))%>%
+    mutate(modelid=ifelse(str_detect(modelid,"^ensemble"),"Ensemble filtering",modelid))%>%
+    mutate(modelid=ifelse(str_detect(modelid,"^glasso"),"Graphical LASSO filtering",modelid))%>%
+    mutate(modelid=ifelse(str_detect(modelid,"^travel"),"Travel time filtering",modelid))%>%
+    mutate(wd=weekdays(last_date))
 
-winners <- s%>%
-    filter(forecast_horizon==3, arLags == 3)%>%
-    group_by(model)%>%filter(MAE==min(MAE))%>%ungroup
-
-star.models <- winners%>%
-    filter(model %in% c("STAR ccf", "STAR glasso", "STAR ensemble", "STAR travelTime"))%>%
-  select(modelid)%>%pull
-#star.models <- c(star.models, "STAR glasso 720 3 0.3 FALSE")
-#cvSummary(results, mae, params=params, cumulative = T)%>%filter(forecast_horizon==3)%>%arrange(MAE)%>%print(n=100)
-
-  fs.tib%>%filter(value>0)%>%filter(modelid %in% gsub("STAR ","",star.models))%>%
-    group_by(modelid,last_date)%>%
+  
+ # Plot number of features per time 
+fs.tib.filtered%>%group_by(modelid,last_date)%>%
     summarise(n=n())%>%arrange(modelid, last_date)%>%
     ggplot(aes(x = last_date, y = n, col=modelid, group=modelid)) + geom_line()
-  
-  fmt<-"%H:%M:%S"
- fs.tib%>%filter(value>0)%>%filter(modelid %in% gsub("STAR ","",star.models))%>%
+
+# Plot weekly pattern for number of features
+fs.tib.filtered%>%group_by(modelid,last_date)%>%
+    summarise(n=n(),maxn=last(maxn))%>%ungroup%>%
+    mutate(last_date_d = format(last_date, format="%a %H:%M",tz="GMT"))%>%
+    group_by(modelid,last_date_d)%>%
+    summarise(mn=mean(n/maxn), ld=last(last_date))%>%
+    ggplot(aes(x = ld, y = mn, col=modelid, group=modelid)) + 
+    geom_line(size=1) +
+    scale_x_datetime(labels = date_format("%a %H:%M"), date_breaks = "12 hours") + 
+    labs(x = "Week day, time of the day", y="Mean sparsity (share of used features)", colour="Feature selection")
+
+# Plot daily pattern for number of features for week days
+fs.tib.filtered%>%filter(!(wd %in% c("Sunday","Saturday")))%>%
     group_by(modelid,last_date)%>%
-    summarise(n=n())%>%
-    mutate(last_date_d = format(last_date, format=fmt,tz="GMT"))%>%
+    summarise(n=n(),maxn=last(maxn))%>%
+    mutate(last_date_d = format(last_date, format="%H:%M",tz="GMT"))%>%
     group_by(modelid,last_date_d)%>%
-    summarise(mn=mean(n), ld=last(last_date))%>%
-    ggplot(aes(x = ld, y = mn, col=modelid, group=modelid)) + geom_line()+scale_x_datetime(labels = date_format(fmt), date_breaks = "3 hours")
+    summarise(mn=mean(n/maxn), ld=last(last_date))%>%
+    ggplot(aes(x = ld, y = mn, col=modelid, group=modelid)) + 
+    geom_line(size=1)+
+    scale_x_datetime(labels = date_format("%H:%M"), date_breaks = "3 hours")+ 
+    labs(x = "Time of the day", y="Mean sparsity (share of used features)", colour="Feature selection")
 
 
- g <- c('model',params) 
- tmp<-results%>%
-      group_by(model_hash,detector)%>%
-      arrange(model_hash,detector,forecast_horizon)%>%
-      mutate(cumactual=cumsum(actual),cumforecasted=cumsum(forecasted))
+# Calculate cummulative results
+cummulative.results.file <-"EWGT2019.results-cum.rds"
+if (file.exists(cummulative.results.file)){
+  results.cum <- readRDS(cummulative.results.file)
+}else{
+  results.cum <-results%>%
+    mutate(modelid=gsub(" NA","",paste(model,trainingMinutes, arLags,glassoRho, ccfThreshold,include.mean,stationary,allowdrift)))%>%
+    group_by(model_hash,detector)%>%
+    arrange(model_hash,detector,forecast_horizon)%>%
+    mutate(cumactual=cumsum(actual),cumforecasted=cumsum(forecasted))
+  saveRDS(results.cum, cummulative.results.file)
+}
  
- saveRDS(tmp, "EWGT2019.results-cum.rds")
- 
- tmp1<-tmp%>%
-  group_by(.dots=c(g,'forecast_horizon','detector', 'datetime'))%>%
-  summarise(v=mae(cumactual,cumforecasted))%>%mutate(modelid=gsub(" NA","",paste(model,trainingMinutes, arLags,glassoRho, ccfThreshold,include.mean,stationary,allowdrift)))
- 
-  gtmp<-tmp1%>%filter(forecast_horizon==3)%>%group_by(modelid,datetime)%>%
-    summarise(mn=mean(v))
+m<-c("Cross-correlation filtering","Ensemble filtering","Graphical LASSO filtering", "Travel time filtering")
+g <- c('model',params) 
+
+results.cum.filtered<-results.cum%>%filter(forecast_horizon==3,modelid %in% star.models)%>%
+    mutate(modelid=ifelse(str_detect(modelid,"^STAR ccf"),"Cross-correlation filtering",modelid))%>%
+    mutate(modelid=ifelse(str_detect(modelid,"^STAR ensemble"),"Ensemble filtering",modelid))%>%
+    mutate(modelid=ifelse(str_detect(modelid,"^STAR glasso"),"Graphical LASSO filtering",modelid))%>%
+    mutate(modelid=ifelse(str_detect(modelid,"^STAR travel"),"Travel time filtering",modelid))
+saveRDS(results.cum.filtered,paste0(cummulative.results.file,".filtered"))
+
+# Group MAE values spatially (by model and datetime)
+gtmp<-results.cum.filtered%>%group_by(modelid,datetime)%>%summarise(mn=mae(cumactual,cumforecasted))
   
-  needs(stringr)
-  m<- winners%>%select(modelid)%>%pull
-  m<-winners%>%select(modelid)%>%filter(str_detect(modelid,"^STAR") )%>%pull
-  m <- c("STAR ccf 480 3 0.7 FALSE","STAR glasso 480 1 0.3 FALSE","STAR ensemble 480 3 0.1 0.7 FALSE","STAR travelTime 480 3 FALSE")
-  m <- c("STAR ensemble 480 3 0.1 0.7 FALSE")
+# Plot temporal dynamic of mean MAE values  
+  gtmp%>%
+    ggplot(aes(x = datetime, y = mn, col=modelid, group=modelid)) + geom_line()+
+    scale_x_datetime(labels = date_format("%d-%m %H:%M"), date_breaks = "1 day")
   
-  gtmp%>%filter(modelid %in% m)%>%
-    ggplot(aes(x = datetime, y = mn, col=modelid, group=modelid)) + geom_line()+scale_x_datetime(labels = date_format(fmt), date_breaks = "1 day")
-  
-  # gtmp%>%filter(modelid %in% m)%>%filter(mn>50)
-  # tmp1%>%filter(forecast_horizon==3,modelid=="STAR ensemble 480 3 0.1 0.7 FALSE",
-  #               last_date=="2017-07-31 07:00:00", v>100)%>%select(detector,last_date,v)
-  # # Problem rnd_86469.volume 2017-07-31 04:00:00 2149
-  # tm<-tmp%>%filter(detector=="rnd_86469.volume", forecast_horizon==3)
-  # tm1<-tm%>%filter(datetime==as.POSIXct("2017-07-31 04:03:00", format="%Y-%m-%d %H:%M:%S",tz="GMT"))
-  # # Problems max rnd_95345.volume  rnd_87459.volume rnd_85591.volume rnd_172.volume
-  # mysample$data%>%select(datetime, rnd_95345.volume)%>%ggplot(aes(x = datetime, y = rnd_95345.volume)) + geom_line()+scale_x_datetime(labels = date_format(fmt), date_breaks ="3 hours")
-                                                                                                
-                                                                                                
-  gtmp%>%filter(modelid %in% m)%>%mutate(last_date_d = format(datetime, format=fmt,tz="GMT"))%>%
+# Group MAE value temporary - by time of the day                                                                      
+  gtmp1<-gtmp%>%filter(modelid %in% m)%>%mutate(last_date_d = format(datetime, format="%H:%M",tz="GMT"))%>%
     group_by(modelid,last_date_d)%>%
-    summarise(meann=median(mn), ld=last(datetime))%>%
-    ggplot(aes(x = ld, y = meann, col=modelid, group=modelid)) + geom_line()+scale_x_datetime(labels = date_format(fmt), date_breaks = "3 hours")
+    summarise(meann=mean(mn), ld=last(datetime))
+  
+# Plot daily patterns of MAE values  
+  gtmp1%>%ggplot(aes(x = ld, y = meann, col=modelid, group=modelid)) + geom_line(size=1) +
+    scale_x_datetime(labels = date_format("%H:%M"), date_breaks = "3 hours") + 
+    labs(x = "Time of the day", y="Mean MAE", colour="Feature selection")
+    
+# Plot differences in daily patterns of models' mean MAE values
+  gtmp1%>%spread(key=modelid,value=meann)%>%
+    mutate(`CCF vs. Ensemble`=`Cross-correlation filtering`-`Ensemble filtering`)%>%
+    mutate(`Travel time vs. Ensemble`=`Travel time filtering`-`Ensemble filtering`)%>%
+    #mutate(`Graphical LASSO vs. Ensemble`=`Graphical LASSO filtering`-`Ensemble filtering`)%>%
+    select(ld,`CCF vs. Ensemble`,`Travel time vs. Ensemble`)%>%
+    gather(`CCF vs. Ensemble`,`Travel time vs. Ensemble`,key="modelid", value="Difference")%>%
+    ggplot(aes(x = ld, y = Difference, col=modelid, group=modelid)) + 
+    geom_line(size=1)+scale_x_datetime(labels = date_format("%H:%M"), date_breaks = "3 hours")+
+    labs(x = "Time of the day", y="Mean MAE difference", colour="Feature selection") + geom_hline(yintercept=0)
   
   
+# Test the hypothesis about MAE
+gtmpX<-results.cum.filtered%>%mutate(last_date_d = format(datetime, format="%H:%M",tz="GMT"))
+
+  stat.results<-gtmpX%>%group_by(modelid,last_date_d)%>%
+  summarise(meann=mean(abs(cumactual-cumforecasted)),sd=sd(abs(cumactual-cumforecasted)), n=n(),ld=max(datetime))%>%
+    gather(variable, value, -c(modelid,last_date_d, ld))%>%
+    unite(tmp, modelid, variable)%>%
+    spread(tmp,value)%>%mutate(ccf_ensemble_t=(`Cross-correlation filtering_meann`-`Ensemble filtering_meann`)/sqrt(`Cross-correlation filtering_sd`^2/`Cross-correlation filtering_n`+`Ensemble filtering_sd`^2/`Ensemble filtering_n`))%>%
+    mutate(travelTime_ensemble_t=(`Travel time filtering_meann`-`Ensemble filtering_meann`)/sqrt(`Travel time filtering_sd`^2/`Travel time filtering_n`+`Ensemble filtering_sd`^2/`Ensemble filtering_n`))%>%
+    mutate(glasso_ensemble_t=(`Graphical LASSO filtering_meann`-`Ensemble filtering_meann`)/sqrt(`Graphical LASSO filtering_sd`^2/`Travel time filtering_n`+`Ensemble filtering_sd`^2/`Ensemble filtering_n`))%>%
+    mutate(`Travel time vs. Ensemble`=`Travel time filtering_meann`-`Ensemble filtering_meann`,
+           `CCF vs. Ensemble`=`Cross-correlation filtering_meann`-`Ensemble filtering_meann`,
+           `Graphical LASSO vs. Ensemble`=`Graphical LASSO filtering_meann`-`Ensemble filtering_meann`)%>%
+    select(`Travel time vs. Ensemble`,travelTime_ensemble_t, `CCF vs. Ensemble`, ccf_ensemble_t,
+           `Graphical LASSO vs. Ensemble`,glasso_ensemble_t)%>%summary
   
-  gtmp%>%filter(modelid %in% m)%>%group_by(modelid)%>%summarise(mean=mean(mn), sd=sd(mn))
-      
+  write.csv(stat.results, "EWGT2019.hypotheses.csv")
+  
 ```
