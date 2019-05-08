@@ -21,7 +21,8 @@ A usual study includes following data processing steps:
 
 1. Data collection. We assume that data is publicly available and can be downloaded (like ADUS data).   
 See [data collection markdown](./data_collection.Rmd) for download routines.
-2. Data transformation
-3. Data cleaning
+2. Data transformation. Collected data are trnasformed into convenietn format.
+See [data transformation markdown](./data_transformation.Rmd) for transformation routines.
+3. Data sampling and cleaning. See [data sampling and cleaning markdown](./sampling.Rmd) for transformation routines.
 4. Conference- or article-specific markdowns
-    + [EWGT-2019]
+    + [EWGT-2019](./EWGT2019.Rmd)
