@@ -53,13 +53,13 @@ cvSummary <- function(results,fun, cumulative=F, params=c()){
       mutate(cumactual=cumsum(actual),cumforecasted=cumsum(forecasted))%>%
       group_by(.dots=c(g,'forecast_horizon','detector'))%>%
       summarise(v=fun(cumactual,cumforecasted))%>%
-      group_by(.dots=c(g,'forecast_horizon'))%>%summarise(!!n :=mean(v), q95=quantile(v,0.95))
+      group_by(.dots=c(g,'forecast_horizon'))%>%summarise(!!n :=mean(v,na.rm=T), q95=quantile(v,0.95,na.rm=T))
   }else{
     results%>%
       group_by(.dots=c(g,'forecast_horizon','detector'))%>%
       summarise(v=fun(actual,forecasted))%>%
       group_by(.dots=c(g,'forecast_horizon'))%>%
-      summarise(!!n :=mean(v), q95=quantile(v,0.95))
+      summarise(!!n :=mean(v,na.rm=T), q95=quantile(v,0.95,na.rm=T))
   }
 }
 

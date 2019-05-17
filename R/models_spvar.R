@@ -47,11 +47,11 @@ prepareFixed <-function(lagM, ARlags, MAlags,series, include.mean=T){
   return(res)
 }
 
-starForecast <-function(sampl, forecastingSteps, lagMatrix, arLags, matrixMode=NULL, control=list(ccfThreshold=0.5), returnModel=F, refine = F, include.mean=F, verbose=T,
+starForecast <-function(sampl, forecastingSteps, arLags, matrixMode=NULL, control=list(ccfThreshold=0.5), returnModel=F, refine = F, include.mean=F, verbose=T,
                         save_links_file = NULL){
   
   last_date <- rownames(sampl)[nrow(sampl)]
-  if (verbose) print(paste("SpVAR [",paste(matrixMode, collapse = ','),"] training sample: ",rownames(sampl)[1],"-",rownames(sampl)[nrow(sampl)]))
+  if (verbose) print(paste("SpVAR! [",paste(matrixMode, collapse = ','),"] training sample: ",rownames(sampl)[1],"-",rownames(sampl)[nrow(sampl)]))
   series <- colnames(sampl)
   fixed <- NULL
   complete <- !is.character(matrixMode) | (matrixMode == "complete")
@@ -66,6 +66,8 @@ starForecast <-function(sampl, forecastingSteps, lagMatrix, arLags, matrixMode=N
                                  series,include.mean=include.mean)+fixed
       if ("glasso" %in% matrixMode) fixed <- glassoFixed(sampl,names(sampl),maxLag=arLags,rho=control$glassoRho,
                                   include.mean=include.mean)+fixed
+      if ("rf" %in% matrixMode) fixed <- rfFixed(sampl,names(sampl),maxLag=arLags,n=control$nfeatures,
+                                                         include.mean=include.mean)+fixed
       if ("CCF" %in% matrixMode) fixed <- prepareFixed(constructCorMatrix(sampl,names(sampl),maxLag=arLags,threshold=control$ccfThreshold), arLags, 0,
                                 series, include.mean=include.mean)+fixed
       # Majority voting
@@ -83,7 +85,12 @@ starForecast <-function(sampl, forecastingSteps, lagMatrix, arLags, matrixMode=N
     }else if (matrixMode == "travelTime"){
       fixed <- prepareFixed(control$lagMatrix, arLags, 0,
                             series,include.mean=include.mean)
+    }else if (matrixMode == "rf"){
+      fixed <- rfFixed(sampl,names(sampl),maxLag=arLags,n=control$nfeatures, include.mean=include.mean)
+    }else if (matrixMode == "univariate"){
+      fixed <- univariateFixed(sampl,names(sampl),maxLag=arLags, include.mean=include.mean)
     }
+    print(paste("Number of links",sum(fixed>0)))
     
     if (!is.null(save_links_file)){
       # tib <- tibble()
@@ -103,7 +110,8 @@ starForecast <-function(sampl, forecastingSteps, lagMatrix, arLags, matrixMode=N
                                           max_lag=arLags,
                                           include_mean=include.mean, last_date=last_date,
                                           glasso_rho=ifelse(is.null(control$glassoRho),NA, control$glassoRho),
-                                          ccf_threshold=ifelse(is.null(control$ccfThreshold),NA, control$ccfThreshold)),
+                                          ccf_threshold=ifelse(is.null(control$ccfThreshold),NA, control$ccfThreshold),
+                                          nfeatures=ifelse(is.null(control$nfeatures),NA, control$nfeatures)),
               paste0(save_links_file,randomStr()))
     }
   }else{
@@ -187,17 +195,60 @@ glassoFixed <- function(data, series, maxLag=3,rho=0.5, include.mean=F){
   return (res)
 }
 
+rfFixed <- function(data, series, maxLag=3,n=20, include.mean=F){
+  univariateF<-univariateFixed(data, series, maxLag,include.mean)
+  orig <- data[,series]
+  orig.names<-series
+  k<-ncol(orig)
+  res<-matrix(0,maxLag*k,k)
+  dat<-orig
+  rnames <- c()
+  for (l in 1:maxLag){
+    cn<-colnames(dat)
+    dat<-cbind(dat[-nrow(dat),], orig[-c(1:l),])  
+    colnames(dat)<-c(cn,paste0(orig.names,"_l",l))
+    rnames<-c(rnames,paste0(series,"_l",l))
+  }
+  cnames <- series
+  if (include.mean){
+    res <- cbind(rep(1,nrow(res)),res)
+    cnames <- c("const", cnames)
+  }
+  rownames(res) <- rnames
+  colnames(res) <- cnames
+  
+  for (s in series){
+    fstr<-paste(s,"~",paste(rnames,sep="", collapse = '+'))
+    d <-dat
+    d[[s]]<- shift(d[[s]], 5)
+    d<-head(d, -5)
+    rf <- randomForest::randomForest(as.formula(fstr), d,importance = T, ntree=((maxLag*length(series)) %/% 3))
+    features<-importance(rf)%>%as.data.frame%>%rownames_to_column%>%filter(`%IncMSE`>0)%>%arrange(desc(`%IncMSE`))%>%slice(1:(n*maxLag))%>%select(rowname)%>%pull
+    #features<-importance(rf)%>%as.data.frame%>%rownames_to_column%>%filter(`%IncMSE`>n)%>%select(rowname)%>%pull
+    print(length(features))
+    res[features, s]<-1
+  }
+  res<-res+univariateF
+  rownames(res) <- rnames
+  colnames(res) <- cnames
+  res[res>0]<-1
+  return (res)
+}
 
 univariateFixed <- function(data, series, maxLag=3, include.mean=F){
   orig <- data[,series]
   orig.names<-series
   k<-ncol(orig)
   res<-data.frame()
+  rnames <- c()
   for (l in 1:maxLag){
     res<-rbind(res,diag(k))
   }
+  cnames <- series
+  
   if (include.mean){
     res <- cbind(rep(1,nrow(res)),res)
+    cnames <- c("const", cnames)
   }
   return (res)
 }
@@ -205,6 +256,51 @@ univariateFixed <- function(data, series, maxLag=3, include.mean=F){
 xModel.star <- list(
   name="STAR",
   run = starForecast,
-  functions = c('prepareFixed','constructCorMatrix','univariateFixed','glassoFixed','randomStr'),
-  packages = c('tidyverse','matrixStats','tseries','e1071','MTS','glasso')
+  functions = c('prepareFixed','constructCorMatrix','univariateFixed','glassoFixed','randomStr',"rfFixed","shift"),
+  packages = c('tidyverse','matrixStats','tseries','e1071','MTS','glasso','randomForest','tibble')
+)
+
+
+bigVARForecast <-function(sampl, forecastingSteps, arLags, struct="Basic", verbose=T){  
+  if (verbose) print(paste("BigVAR; training sample: ",rownames(sampl)[1],"-",rownames(sampl)[nrow(sampl)]))
+
+  half <- nrow(sampl) %/% 2
+  mod1<-constructModel(sampl%>%as.matrix,p=arLags,struct=struct,gran=c(50,10),
+                       RVAR=FALSE,h=5,cv="Rolling",MN=FALSE,verbose=FALSE,IC=F, recursive=T,
+                       T1=half, T2=(nrow(sampl)-1),
+                       intercept = F,window.size=half)
+  r<-cv.BigVAR(mod1)
+  f<-c()
+  for (h in 1:forecastingSteps){
+    f<-c(f,predict(r,n.ahead=h))
+  }
+  res <- matrix(f,nrow=forecastingSteps,byrow=T)
+# 
+#   mod2<-constructModel(sampl%>%as.matrix,p=arLags,struct="Basic",gran=c(0.0000000001),ownlambdas=T, intercept = F)
+#   r<-BigVAR.est(mod2)
+#   res<-predictBigVAR(r$B[,,1],sampl%>%as.matrix,p=arLags,h=forecastingSteps)
+
+  colnames(res) <- colnames(sampl)
+  return(res)
+}
+
+predictBigVAR <- function(beta,data,p, h=1){
+  for (i in 1:h){
+    n<-nrow(data)
+    fcst<-c()
+    for (i in 1:3){
+      fcst<-c(fcst,as.numeric(as.vector(data[nrow(data)-i+1,])))
+    }
+    f<-c(beta%*%c(0,fcst))
+    data<-rbind(data, f)
+  }
+  n<-nrow(data)
+  return(data[(n-h+1):n,])
+}
+
+xModel.bigVAR <- list(
+  name="BigVAR",
+  run = bigVARForecast,
+  functions = c('predictBigVAR'),
+  packages = c('tidyverse','BigVAR')
 )
