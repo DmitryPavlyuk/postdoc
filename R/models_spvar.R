@@ -223,9 +223,11 @@ rfFixed <- function(data, series, maxLag=3,n=20, include.mean=F){
     d[[s]]<- shift(d[[s]], 5)
     d<-head(d, -5)
     rf <- randomForest::randomForest(as.formula(fstr), d,importance = T, ntree=((maxLag*length(series)) %/% 3))
-    features<-importance(rf)%>%as.data.frame%>%rownames_to_column%>%filter(`%IncMSE`>0)%>%arrange(desc(`%IncMSE`))%>%slice(1:(n*maxLag))%>%select(rowname)%>%pull
+    features<-importance(rf)%>%as.data.frame%>%rownames_to_column%>%filter(`%IncMSE`>0)
+    tot<-nrow(features)
+    features<-features%>%arrange(desc(`%IncMSE`))%>%slice(1:(n*maxLag))%>%select(rowname)%>%pull
     #features<-importance(rf)%>%as.data.frame%>%rownames_to_column%>%filter(`%IncMSE`>n)%>%select(rowname)%>%pull
-    print(length(features))
+    print(paste("Selected features",length(features),"from",tot))
     res[features, s]<-1
   }
   res<-res+univariateF
@@ -266,7 +268,7 @@ bigVARForecast <-function(sampl, forecastingSteps, arLags, struct="Basic", verbo
 
   half <- nrow(sampl) %/% 2
   mod1<-constructModel(sampl%>%as.matrix,p=arLags,struct=struct,gran=c(50,10),
-                       RVAR=FALSE,h=5,cv="Rolling",MN=FALSE,verbose=FALSE,IC=F, recursive=T,
+                       RVAR=TRUE,h=5,cv="Rolling",MN=FALSE,verbose=FALSE,IC=F, recursive=T,
                        T1=half, T2=(nrow(sampl)-1),
                        intercept = F,window.size=half)
   r<-cv.BigVAR(mod1)
