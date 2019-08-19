@@ -223,7 +223,7 @@ rfFixed <- function(data, series, maxLag=3,n=20, include.mean=F){
     d[[s]]<- shift(d[[s]], 5)
     d<-head(d, -5)
     rf <- randomForest::randomForest(as.formula(fstr), d,importance = T, ntree=((maxLag*length(series)) %/% 3))
-    features<-importance(rf)%>%as.data.frame%>%rownames_to_column%>%filter(`%IncMSE`>0)
+    features<-randomForest::importance(rf)%>%as.data.frame%>%rownames_to_column%>%filter(`%IncMSE`>0)
     tot<-nrow(features)
     features<-features%>%arrange(desc(`%IncMSE`))%>%slice(1:(n*maxLag))%>%select(rowname)%>%pull
     #features<-importance(rf)%>%as.data.frame%>%rownames_to_column%>%filter(`%IncMSE`>n)%>%select(rowname)%>%pull

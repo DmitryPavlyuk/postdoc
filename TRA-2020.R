@@ -8,6 +8,7 @@ if (!require(needs)) {
   install.packages('needs')
 }
 devtools::install_github('ropensci/gtfsr')
+require(needs)
 needs(gtfsr)
 needs(magrittr)
 needs(dplyr)
@@ -26,20 +27,63 @@ data <- import_gtfs("https://openmobilitydata-data.s3-us-west-1.amazonaws.com/pu
 
 
 #tickets<-read_delim(paste0(getwd(),"/RigasKarte/export2.csv"),";", col_types = "Tccicccic")
-folder<-"C:/Users/dmitr/Desktop/Validations-Dump_2018/"
+folder<-paste0(getwd(),"/RK/Validations-Dump_2018/")
 data<-tibble()
-for (file in list.files(filder)){
+c <- 1
+for (file in list.files(folder)){
+  print(file)
   tickets<-read_delim(paste0(folder,file),";", col_types = "Tcccicccccc", 
                       col_names=c("datetime","tick","route_name", "route_direction","transport_id","ticket_type","mode","card_number","route_number","transport_code","code"))
   data <- bind_rows(data,tickets)
+  c<-c+1
+  if (c %% 10 == 0){
+    saveRDS(data, paste0(folder,"data",c,".rds"))
+    data<-tibble()
+  }
 }
-summary(tickets)
-mode_ass<-c(Tramway="tram", `Urban Bus`="bus", Trolleybus="trol")
-tickets$mode<-as.factor(tickets$mode)
-tickets%<>%mutate(date=format(datetime-3*60*60, format="%Y%m%d",tz="GMT"))%>%mutate(route_id=paste("riga",mode_ass[mode],route_number,sep="_"))
+saveRDS(data, paste0(folder,"data",c,".rds"))
+data<-tibble()
+for (file in list.files(folder, pattern="\\.rds$")){
+  print(file)
+    d<-readRDS(paste0(folder,file))
+    data <- bind_rows(data,d)
+}
+saveRDS(data, paste0(folder,"complete.rds"))
 
-tickets%>%group_by(card_number)%>%summarise(n=n())%>%filter(n>1)
-tickets%>%filter(card_number=="140873008564683")
+data <- readRDS(paste0(folder,"complete.rds"))
+
+sample<-data[1:10000,]
+saveRDS(sample, paste0(folder,"sample.rds"))
+
+needs(lubridate)
+data%<>%mutate(date=ymd(format(datetime-3*60*60, format="%Y%m%d",tz="GMT")))
+saveRDS(data, paste0(folder,"complete.rds"))
+
+data.daily<-data%>%group_by(date)%>%summarize(n=n())
+data.day <- data%>%filter(date>ymd(20180610),date<ymd(20180618))
+data.day%<>%mutate(mode=ifelse(mode=="Train" & as.integer(route_number)>100, "Urban bus", mode))
+data.day%<>%filter(mode!="Train")
+data.day%>%filter(mode=="Indeterminated")%>%select(route_name, route_number)%>%print(n=1000)
+data.day%<>%mutate(mode=ifelse(mode=="Indeterminated", "Tramway", mode))
+
+
+data.day%<>%mutate(minute=round_date(datetime,"10 mins"))
+needs(ggplot2)
+ggplot(data=data.day%>%group_by(minute)%>%summarize(n=n()), aes(x=minute, y=n)) +  geom_line()
+ggplot(data=data.day%>%group_by(date,minute, mode)%>%summarize(n=n()), aes(x=minute, y=n, group=mode, color=mode)) +  geom_line()
+
+
+
+summary(data.day)
+mode_ass<-c(Tramway="tram", `Urban bus`="bus", Trolleybus="trol")
+data.day$mode<-as.factor(data.day$mode)
+data.day%<>%mutate(route_id=paste("riga",mode_ass[mode],route_number,sep="_"))
+
+data.day%>%group_by(card_number)%>%summarise(n=n())%>%arrange(desc(n))%>%filter(n>1)%>%print(n=100)
+data.day%>%arrange(datetime)%>%filter(card_number=="2030760589")%>%print(n=50)
+
+
+
 
 data[['routes_df']] <- data[['routes_df']]%>%rename(route_id=1)
 data[['trips_df']] <- data[['trips_df']]%>%rename(route_id=1)

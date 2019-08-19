@@ -45,10 +45,10 @@ source(file.path("R","models_spvar.R"))
 
 
 # Define files for intermediate results
-models.estimated.file <- "EWGT2019.models.estimated.rds"
-results.file <- "EWGT2019.results.rds"
-fs.file <- "EWGT2019.fs.rds"
-summary.file <- "EWGT2019.summary.rds"
+models.estimated.file <- "EWGT2019/EWGT2019.models.estimated.rds"
+results.file <- "EWGT2019/EWGT2019.results.rds"
+fs.file <- "EWGT2019/EWGT2019.fs.rds"
+summary.file <- "EWGT2019/EWGT2019.summary.rds"
 ```
 
 
@@ -407,8 +407,8 @@ if (file.exists(summary.file)){
   s.mase<-s.mase%>%mutate(modelid=paste(model,trainingMinutes, arLags,glassoRho, ccfThreshold,include.mean,stationary,allowdrift))%>%mutate(modelid=gsub(" NA","",modelid)) 
   s<-list(s.mae=s.mae, s.rmse=s.rmse,s.mase=s.mase)
   # Save summary statistics for further usage
-  write.csv(s$s.mae%>%select(-q95)%>%spread(key=forecast_horizon,value=MAE)%>%group_by(model)%>%filter(`3`==min(`3`))%>%arrange(`3`), "EWGT2019.mae.csv")
-  write.csv(s2%>%select(-q95)%>%spread(key=forecast_horizon,value=RMSE)%>%group_by(model)%>%filter(`3`==min(`3`))%>%arrange(`3`), "EWGT2019.rmse.csv")
+  write.csv(s$s.mae%>%select(-q95)%>%spread(key=forecast_horizon,value=MAE)%>%group_by(model)%>%filter(`3`==min(`3`))%>%arrange(`3`), "EWGT2019/EWGT2019.mae.csv")
+  write.csv(s2%>%select(-q95)%>%spread(key=forecast_horizon,value=RMSE)%>%group_by(model)%>%filter(`3`==min(`3`))%>%arrange(`3`), "EWGT2019/EWGT2019.rmse.csv")
   saveRDS(s, summary.file)
 }
 
@@ -456,7 +456,7 @@ fs.tib.filtered%>%filter(!(wd %in% c("Sunday","Saturday")))%>%
 
 
 # Calculate cummulative results
-cummulative.results.file <-"EWGT2019.results-cum.rds"
+cummulative.results.file <-"EWGT2019/EWGT2019.results-cum.rds"
 if (file.exists(cummulative.results.file)){
   results.cum <- readRDS(cummulative.results.file)
 }else{
@@ -471,15 +471,38 @@ if (file.exists(cummulative.results.file)){
 m<-c("Cross-correlation filtering","Ensemble filtering","Graphical LASSO filtering", "Travel time filtering")
 g <- c('model',params) 
 
-results.cum.filtered<-results.cum%>%filter(forecast_horizon==3,modelid %in% star.models)%>%
+cummulative.results.file.filtered<-paste0(cummulative.results.file,".filtered")
+if (file.exists(cummulative.results.file.filtered)){
+  results.cum.filtered <- readRDS(cummulative.results.file.filtered)
+}else{
+  results.cum.filtered<-results.cum%>%filter(forecast_horizon==3,modelid %in% star.models)%>%
     mutate(modelid=ifelse(str_detect(modelid,"^STAR ccf"),"Cross-correlation filtering",modelid))%>%
     mutate(modelid=ifelse(str_detect(modelid,"^STAR ensemble"),"Ensemble filtering",modelid))%>%
     mutate(modelid=ifelse(str_detect(modelid,"^STAR glasso"),"Graphical LASSO filtering",modelid))%>%
     mutate(modelid=ifelse(str_detect(modelid,"^STAR travel"),"Travel time filtering",modelid))
-saveRDS(results.cum.filtered,paste0(cummulative.results.file,".filtered"))
+  saveRDS(results.cum.filtered,cummulative.results.file.filtered)
+}
 
 # Group MAE values spatially (by model and datetime)
 gtmp<-results.cum.filtered%>%group_by(modelid,datetime)%>%summarise(mn=mae(cumactual,cumforecasted))
+
+#Plot distribution
+m<-c("Cross-correlation filtering","Ensemble filtering")
+  gtmp%>%filter(modelid %in% m)%>%
+    ggplot(aes(x = mn, group=modelid, fill=modelid)) +
+  geom_density(kernel = "epanechnikov", alpha = 0.4)+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))+labs(x="Spatially averaged MAE")
+ gtmp1<-results.cum.filtered%>%mutate(last_date_d = format(datetime, format="%H:%M",tz="GMT"))
+ 
+ gtmp2<-gtmp1%>%group_by(modelid,last_date_d)%>%summarise(mn=mae(cumactual,cumforecasted))
+ 
+ 
+ gtmp2%>%ggplot(aes(x = mn, group=modelid, fill=modelid)) +
+  geom_density(kernel = "epanechnikov", alpha = 0.4)+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))+labs(x="Spatially averaged MAE")
+ 
   
 # Plot temporal dynamic of mean MAE values  
   gtmp%>%
