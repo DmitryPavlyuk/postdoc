@@ -1,0 +1,135 @@
+---
+title: "RelStat-2019"
+author: "Dmitry Pavlyuk"
+date: "August, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+This markdown document reproduces the research, submitted to the 19th International Multi-Conference Reliability and Statistics in Transportation and Communication - RelStat-2019
+
+
+```{r child='sampling.Rmd'}
+```
+
+
+Load necessary libraries
+----------------
+```{r libs}
+memory.limit(size=1024*128)
+library(needs)
+needs(tidyverse)
+needs(ggplot2)
+needs(imager)
+needs(magrittr)
+needs(RColorBrewer)
+needs(TSdist)
+
+```
+```{r load_data}
+series <- colnames(mysample$data)[-1]
+
+k <- length(series)
+mysample$data<-mysample$data[1:(24*60*1),c("datetime",series)]
+#mysample$data<-mysample$data[,c("datetime",series)]
+print(paste("Number of series", length(series)))
+
+# Prepare a matrix of maximal lags (for travel time regularisation)
+lagMatrix <- round(mysample$shortest.distances / ta)
+lagMatrix[is.infinite(lagMatrix)]<-0
+rownames(lagMatrix)<-paste0(rownames(lagMatrix),".volume")
+colnames(lagMatrix)<-paste0(colnames(lagMatrix),".volume")
+lagMatrix<-lagMatrix[as.vector(series),as.vector(series)]
+
+node.names <- gsub(".volume", "", series)
+config.tibble <- readRDS(config.rds)
+config.nodes <- CombineToNodes(config.tibble)
+
+```
+
+
+```{r experiments}
+imfolder <- file.path(getwd(),"traffic_images")
+unlink(imfolder, recursive = T)
+dir.create(imfolder)
+
+
+#multiscaling
+d<-mysample$shortest.distances
+
+dat<-mysample$data[,series]
+dat<-as_tibble(cbind(t(dat)))%>%as.data.frame
+rownames(dat)<-node.names
+d<-TSDatabaseDistances(dat, "dtw")
+d<-as.matrix(d)
+
+
+diag(d)<-0
+d[d==Inf]<-max(d[d<Inf])
+fit <- cmdscale(d,eig=TRUE, k=2)
+v<-as_tibble(fit$points,rownames="node")
+
+nodes <- config.nodes %>% filter(node_name %in% node.names)
+nodes<-nodes%>%left_join(v, by=c("node_name"="node"))%>%mutate(node_lat=V1, node_lon=V2)
+##multiscaling ned
+
+# Read sample data
+minx<-min(nodes$node_lat)
+maxx<-max(nodes$node_lat)
+miny<-min(nodes$node_lon)
+maxy<-max(nodes$node_lon)
+print(paste(minx, maxx, miny, maxy))
+
+resolution.x<-80
+resolution.y<-64
+
+minintensity <- min(mysample$data[,series])
+maxintensity <- max(mysample$data[,series])
+minintensity <- -100
+maxintensity <- 100
+num <- 1
+for (i in seq(1,nrow(mysample$data),by=1)){
+vals <- mysample$data[i,series]
+colnames(vals)<-node.names
+
+vals <- vals%>%gather(node.names,key='node', value='value')
+nodes<-nodes%>%mutate(x=floor(((node_lat-minx)/(maxx-minx)) * (resolution.x-1))+1, y=floor(((node_lon - miny)/(maxy-miny)) * (resolution.y-1))+1)
+
+  
+m<-matrix(NA,resolution.x,resolution.y)
+pixels<-nodes%>%left_join(vals, by=c("node_name"="node"))%>%select(x, y, value)
+
+#Temporary image specific
+#minintensity <- min(pixels$value)
+#maxintensity <- max(pixels$value)
+
+#im<-as.cimg(pixels, dims=c(resolution.x,resolution.y,1,1))
+#save.image(im, "test.png")
+
+for (j in (1:nrow(pixels))){
+  m[as.integer(pixels[j,"x"]),as.integer(pixels[j,"y"])] <- (as.integer(pixels[j,"value"])-minintensity)/(maxintensity-minintensity)
+}
+#dev.new(width=resolution.x, height=resolution.y)
+#im.width<-resolution.x
+#im.height<-resolution.y
+im.width<- resolution.x*3
+im.height<- resolution.y*3
+print(sum(!is.na(m)))
+png(file.path(imfolder,paste0(sprintf("%010d", num),".png")), width = im.width, height=im.height)
+par(mar=c(0,0,1,0))
+
+cool = rainbow(10, start=rgb2hsv(col2rgb('cyan'))[1], end=rgb2hsv(col2rgb('blue'))[1])
+warm = rainbow(10, start=rgb2hsv(col2rgb('red'))[1], end=rgb2hsv(col2rgb('yellow'))[1])
+cols = c(rev(cool),"#CCCCCC", rev(warm))
+
+mypalette <- colorRampPalette(cols)(255)
+
+image(m, useRaster=FALSE, axes=FALSE, col=mypalette, zlim=c(0,1))
+title(format(mysample$data[i,"datetime"]%>%pull, "%H:%M"), font.main=4)
+dev.off()
+
+
+num<-num+1
+}
+```
