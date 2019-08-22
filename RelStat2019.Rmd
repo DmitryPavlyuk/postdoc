@@ -25,6 +25,7 @@ needs(imager)
 needs(magrittr)
 needs(RColorBrewer)
 needs(TSdist)
+needs(asymmetry)
 
 ```
 ```{r load_data}
@@ -155,9 +156,16 @@ rownames(d)<-nodes%>%select(node_name)%>%pull
 
 diag(d)<-0
 d[d==Inf]<-max(d[d<Inf])
+
+#fit<-asymscal(d, ndim = 2, itmax = 10000, eps = 1e-10)
+#plot(fit$cweights[,1])
+#v<-as_tibble(fit$cweights[,1])
+#v$node<-node.names
+#v$V1<-v$value
+
 fit <- cmdscale(d,eig=TRUE, k=1)
 v<-as_tibble(fit$points,rownames="node")
-v<-v %>% mutate(rank = dense_rank(desc(V1)))
+v<-v %>% mutate(rank = dense_rank(desc(V1)))%>%select(node,rank)
 
 minintensity <- min(mysample$data[,series])
 maxintensity <- max(mysample$data[,series])
