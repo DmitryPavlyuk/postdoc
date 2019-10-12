@@ -121,17 +121,19 @@ load_schedule <- function(gtfs.folder, day){
 match_trips<-function(data.day, data, date.str){
   print("Matching extracted trips to scheduled...")
   trip.schedule <- data$trips_df%>%left_join(data$stop_times_df, by=c("trip_id"))%>%group_by(trip_id,shape_id)%>%summarise(first_stop=min(arrival_time), last_stop=max(departure_time))%>%arrange(shape_id, first_stop)
-  trip.fact<-data.day%>%group_by(trip_id,shape_id)%>%summarise(first_reg=min(first_reg), last_reg=min(last_reg), reg_count=n())%>%filter(reg_count>1)%>%mutate(dur=(as.numeric(last_reg)-as.numeric(first_reg))/60)
+  trip.fact<-data.day%>%
+                group_by(trip_id,shape_id)%>%summarise(first_reg=min(first_reg), last_reg=min(last_reg), reg_count=n())%>%filter(reg_count>1)%>%mutate(dur=(as.numeric(last_reg)-as.numeric(first_reg))/60)
   #trip.fact%<>%filter(dur<300)
   
   trip.schedule%<>%mutate(first_stop=as.POSIXct(paste(date.str,first_stop),format="%Y-%m-%d %H:%M:%S",tz="UTC"),
                           last_stop=as.POSIXct(paste(date.str,last_stop),format="%Y-%m-%d %H:%M:%S", tz="UTC"))
-  res<-trip.fact%>%arrange(shape_id, first_reg)%>%left_join(trip.schedule%>%arrange(shape_id, first_stop), by=c("shape_id"))%>%filter(first_reg>first_stop,first_reg<(first_stop+10*60), last_reg<=(last_stop+20*60))
-  res%<>%mutate(ddiff=abs(as.numeric(first_reg)-as.numeric(first_stop))+abs(as.numeric(last_reg)-as.numeric(last_stop)))
+  res<-trip.fact%>%arrange(shape_id, first_reg)%>%left_join(trip.schedule%>%arrange(shape_id, first_stop), by=c("shape_id"))%>%filter(first_reg>first_stop,first_reg<(first_stop+10*60))#, last_reg<=(last_stop+20*60))
+  res%<>%mutate(ddiff=abs(as.numeric(first_reg)-as.numeric(first_stop)))#+abs(as.numeric(last_reg)-as.numeric(last_stop)))
   res%<>%group_by(trip_id.x)%>%slice(which.min(ddiff))
   trip.match<-res%>%filter(!is.na(trip_id.y))%>%select(trip_id.x,trip_id.y)
   
-  data.day%<>%left_join(trip.match, by=c("trip_id"="trip_id.x"))%>%filter(!is.na(trip_id.y))%>%ungroup%>%
+  data.day%<>%group_by(card_number)%>%mutate(first_day=(datetime==min(datetime)))%>%
+    left_join(trip.match, by=c("trip_id"="trip_id.x"))%>%filter(!is.na(trip_id.y))%>%ungroup%>%
     mutate(id=row_number())%>%left_join(data$stop_times_df,by=c("trip_id.y"="trip_id"))%>%
     mutate(arrival_time=as.POSIXct(paste(date.str,arrival_time),format="%Y-%m-%d %H:%M:%S",tz="UTC"))%>%
     mutate(ddiff=abs(as.numeric(datetime)-as.numeric(arrival_time)))%>%group_by(id)%>%slice(which.min(ddiff))%>%
@@ -162,14 +164,14 @@ find_chains <- function(data.day){
   }
   
   data.day$chain_id<-apply(data.day, 1, f)
-  data.chains<-data.day%>%arrange(datetime)%>%group_by(card_number, chain_id)%>%summarise(chain_start=min(datetime), chain_end=max(datetime),start_stop_id=first(stop_id),last_stop_id=last(stop_id))
+  data.chains<-data.day%>%arrange(datetime)%>%group_by(card_number, chain_id)%>%summarise(chain_start=min(datetime), chain_end=max(datetime),start_stop_id=first(stop_id),last_stop_id=last(stop_id),first_day=any(first_day))
   return(data.chains)
 }
 
 find_mobility_vectors <- function(data.day){
   print("Constructing mobility vectors...")
   df <- data.day
-  first_day<-""
+  first_day<-NA
   prev_card<-""
   prev_stop<-""
   prev_last<-""
@@ -183,24 +185,29 @@ find_mobility_vectors <- function(data.day){
     chain_start<-x["chain_start"]
     start<-x["start_stop_id"]
     last<-x["last_stop_id"]
+    fd<-x["first_day"]
     if(card!=prev_card || cou==1){
-      if (cou>1){
+      if (cou>1 && !is.na(first_day)){
         mobility[[length(mobility)+1]]<<-data.frame(card_number=prev_card,datetime=NA, start=prev_last, end=first_day)
       }
-      first_day<<-start
+      if (fd){
+        first_day<<-start
+      } else{
+        first_day<<-NA
+      }
     }else{
       mobility[[length(mobility)+1]]<<-data.frame(card_number=card,datetime=prev_time, start=prev_stop, end=start)
     }
     if (cou==nrow(data.day)){
       if (start!=last) mobility[[length(mobility)+1]]<<-data.frame(card_number=card,datetime=chain_start, start=start, end=last)
-      mobility[[length(mobility)+1]]<<-data.frame(card_number=card,datetime=NA, start=last, end=first_day)
+      if (!is.na(first_day)) mobility[[length(mobility)+1]]<<-data.frame(card_number=card,datetime=NA, start=last, end=first_day)
     }
     prev_stop<<-start
     prev_time<<-chain_start
     prev_last<<-last
     prev_card<<-card
   }
-  apply(data.day, 1, f)
+  apply(data.day%>%arrange(card_number,chain_start), 1, f)
   mobility<-as_tibble(bind_rows(mobility))
   mobility%<>%mutate(datetime=as.POSIXct(datetime,format="%Y-%m-%d %H:%M:%S",tz="UTC"))
   mobility%<>%left_join(data$stops_df, by=c("start"="stop_id"))%>%left_join(data$stops_df, by=c("end"="stop_id"))%>%
@@ -209,7 +216,7 @@ find_mobility_vectors <- function(data.day){
 }
 
 
-construct_daily_mobility <- function(mobility, day,start_hours, vector_count, limit=32000){
+construct_daily_mobility <- function(mobility, day,start_hours, vector_count, limit=0){
   print("Constructing mobility patterns...")
   t<-data.frame()
   
@@ -223,9 +230,10 @@ construct_daily_mobility <- function(mobility, day,start_hours, vector_count, li
       to<-as.POSIXct(paste0(day," ",sprintf("%02d", st[2]),":00:00"),format="%Y-%m-%d %H:%M:%S",tz="UTC")
       test<-mobility%>%filter(datetime>from, datetime<to)
     }
-    if (nrow(test)>limit) test%<>%sample_n(limit)
+    if (limit>0 && nrow(test)>limit) test%<>%sample_n(limit)
     print(paste("Size",nrow(test)))
-    test%<>%mutate(X1=ifelse(is.na(datetime),0,as.numeric(datetime)))%>%
+    test%<>%
+      mutate(X1=ifelse(is.na(datetime),rnorm(nrow(test),19*60,4*60),hour(datetime)*60+minute(datetime)))%>%
       mutate(X2=as.numeric(stop_lat.x))%>%
       mutate(X3=as.numeric(stop_lon.x))%>%
       mutate(X4=as.numeric(stop_lat.y))%>%
@@ -234,10 +242,16 @@ construct_daily_mobility <- function(mobility, day,start_hours, vector_count, li
     vect<-test%>%mutate(X1norm=(X1-mean(X1))/sd(X1))%>%
       mutate(X2norm=(X2-mean(X2))/sd(X2))%>%mutate(X3norm=(X3-mean(X3))/sd(X3))%>%mutate(X4norm=(X4-mean(X4))/sd(X4))%>%mutate(X5norm=(X5-mean(X5))/sd(X5))%>%
       select(X1norm,X2norm,X3norm,X4norm,X5norm)
-    d<-dist(vect, method = "euclidean")
-    hc1 <- hclust(d, method = "complete" )
+    #d<-dist(vect, method = "euclidean")
+    #hc1 <- hclust(d, method = "complete" )
+    #test$cluster<-cutree(hc1, k=vector_count)
     
-    test$cluster<-cutree(hc1, k=vector_count)
+    #kc <- kmeans(d, vector_count)
+    #test$cluster<-kc$cluster
+    kc<-MiniBatchKmeans(vect,vector_count)
+    test$cluster<-predict_KMeans(vect, kc$centroids)
+    #Optimal_Clusters_GMM(vect,max_clusters = 50)
+    
     t<-bind_rows(t,test%>%group_by(cluster)%>%
                    summarise(stop_lat.x=mean(stop_lat.x,na.rm=T),stop_lon.x=mean(stop_lon.x,na.rm=T),
                              stop_lat.y=mean(stop_lat.y,na.rm=T),stop_lon.y=mean(stop_lon.y,na.rm=T),
@@ -248,29 +262,30 @@ construct_daily_mobility <- function(mobility, day,start_hours, vector_count, li
   return(t)
 }
 
-normalise_pattern <- function(mobility.pattern){
+normalise_pattern <- function(mobility.pattern,norm.vals){
   mobility.pattern%>%
-    mutate(X1=ifelse(is.na(datetime),0,as.numeric(datetime)))%>%
+    mutate(dayminutes=hour(datetime)*60+minute(datetime))%>%
+    mutate(X1=ifelse(is.na(dayminutes),rnorm(nrow(mobility.pattern),19*60,4*60),as.numeric(dayminutes)))%>%
     mutate(X2=as.numeric(stop_lat.x))%>%
     mutate(X3=as.numeric(stop_lon.x))%>%
     mutate(X4=as.numeric(stop_lat.y))%>%
     mutate(X5=as.numeric(stop_lon.y))%>%
     mutate(X6=as.numeric(size))%>%
-    mutate(X1norm=(X1-mean(X1))/sd(X1))%>%
-    mutate(X2norm=(X2-mean(X2))/sd(X2))%>%
-    mutate(X3norm=(X3-mean(X3))/sd(X3))%>%
-    mutate(X4norm=(X4-mean(X4))/sd(X4))%>%
-    mutate(X5norm=(X5-mean(X5))/sd(X5))%>%
-    mutate(X6norm=(X6-mean(X6))/sd(X6))%>%
-    select(X1norm,X2norm,X3norm,X4norm,X5norm)
+    mutate(X1norm=(X1-norm.vals$dayminutes.mean)/norm.vals$dayminutes.sd)%>%
+    mutate(X2norm=(X2-norm.vals$stop_lat.x.mean)/norm.vals$stop_lat.x.sd)%>%
+    mutate(X3norm=(X3-norm.vals$stop_lon.x.mean)/norm.vals$stop_lon.x.sd)%>%
+    mutate(X4norm=(X4-norm.vals$stop_lat.y.mean)/norm.vals$stop_lat.y.sd)%>%
+    mutate(X5norm=(X5-norm.vals$stop_lon.y.mean)/norm.vals$stop_lon.y.sd)%>%
+    mutate(X6norm=(X6-norm.vals$size.mean)/norm.vals$size.sd)%>%
+    select(X1norm,X2norm,X3norm,X4norm,X5norm,X6norm)
 }
 
-pattern_distance <- function(mobility.pattern1, mobility.pattern2,filter_size=0){
+pattern_distance <- function(mobility.pattern1, mobility.pattern2,norm.vals,filter_size=0){
   p1<-mobility.pattern1
   if (filter_size>0) p1%<>%filter(size>filter_size)
   p2<-mobility.pattern2
   if (filter_size>0) p2%<>%filter(size>filter_size)
-  r1<-smint::closest(X=as.matrix(normalise_pattern(p1)),XNew=as.matrix(normalise_pattern(p2)))
-  r2<-smint::closest(X=as.matrix(normalise_pattern(p1)),XNew=as.matrix(normalise_pattern(p2)))
+  r1<-smint::closest(X=as.matrix(normalise_pattern(p1,norm.vals)),XNew=as.matrix(normalise_pattern(p2,norm.vals)))
+  r2<-smint::closest(X=as.matrix(normalise_pattern(p1,norm.vals)),XNew=as.matrix(normalise_pattern(p2,norm.vals)))
   return(min(sum(r1$dist),sum(r1$dist)))
 }

@@ -14,6 +14,10 @@ needs(readr)
 needs(lubridate)
 needs(ggplot2)
 needs(leaflet)
+needs(factoextra)
+needs(NbClust)
+needs(ClusterR)
+needs(tidyverse)
 options(viewer = NULL)
 
 source(file.path("TRA-2020-functions.R"))
@@ -52,7 +56,10 @@ if (!dir.exists(daily.folder)){
 }
 
 
-my.travels%>%group_by(date)%>%summarize(n=n())%>%print(n=100)
+my.travels%>%group_by(date)%>%summarize(n=n())%>%print(n=20)
+my.travels%>%filter(date==ymd(20180207))%>%arrange(datetime)
+#cday<-ymd(20180207)
+cday<-ymd(20180129)
 
 if (!dir.exists(processed.folder)) dir.create(processed.folder)
 
@@ -87,7 +94,7 @@ while(cday<=end_date){
   data.day<-match_trips(data.day, data, day)
   data.day%>%ungroup%>%summarise(tickets=n(),trips=n_distinct(trip_id), matched_trips=n_distinct(trip_id.y))
   
-  stat$matched_trip_count<-data.day%>%ungroup%>%summarise(matched_trips=n_distinct(trip_id.y))%>%select(matched_trips)%>%pull
+  stat$matched_trip_count<-data.day%>%nrow
   
   #data.day%>%filter(card_number=="53372409")%>%arrange(datetime)%>%select(datetime, trip_id, trip_id.y, stop_name)
   
@@ -96,19 +103,29 @@ while(cday<=end_date){
   #data.chains%>%filter(card_number=="53372409")
   stat$chain_count<-data.chains%>%ungroup%>%summarise(chains=n_distinct(chain_id))%>%select(chains)%>%pull
   
+  #mobility%>%filter(card_number=="53372409")
   
   mobility<-find_mobility_vectors(data.chains)
   stat$mobility_vector_count<-mobility%>%nrow
   stat$mobility_total_distance<-mobility%>%ungroup%>%summarise(dist=sum(distance))%>%select(dist)%>%pull
   
+ 
+  df<-mobility%>%filter(card_number=="53372409")%>%mutate(label=ifelse(is.na(datetime),"back",format(datetime,"%H:%M")))
+  if (nrow(df)>0){
+    m <- leaflet() %>%addTiles()
+  for(i in 1:nrow(df)){
+    m%<>%addPolylines(label=as.character(df[i, "label"]),labelOptions = labelOptions(noHide = T),
+                      lat = as.numeric(df[i, c("stop_lat.x", "stop_lat.y")]), 
+                      lng = as.numeric(df[i, c("stop_lon.x", "stop_lon.y")]))%>%
+      addCircleMarkers(lat = as.numeric(df[i, c("stop_lat.y")]), 
+                       lng = as.numeric(df[i, c("stop_lon.y")]),radius=4,color="#F30")
+  }
+  print(m)
+  }
   
-  #
-  mobility%<>%filter(distance>1000)
-  #
-  
-  daily.mobility <- construct_daily_mobility(mobility,day,list(c(5,11),c(11,15),c(15,24),c(NA)),10)
-  
-  result<-list(stat=stat, mobility.pattern=daily.mobility)
+  daily.mobility <- construct_daily_mobility(mobility%>%filter(distance>1000),day,list(c(5,11),c(11,15),c(15,24),c(NA)),10)
+  #daily.mobility <- construct_daily_mobility(mobility,day,list(c(5,24),c(NA)),30)
+  result<-list(stat=stat, data.chains=data.chains, mobility=mobility, mobility.pattern=daily.mobility)
   saveRDS(result,paste0(processed.folder,format(cday,"%Y%m%d"),".rds"))
   cday<-cday+1
 }
@@ -122,10 +139,37 @@ res<-list()
 for (file in fs){
   res[[file]]<-readRDS(paste0(processed.folder,file,".rds"))
 }
+
+
+all.vectors<-data.frame()
+invisible(lapply(seq_along(res), function(i){
+  all.vectors<<-bind_rows(all.vectors,res[[i]]$mobility.pattern)
+}))
+norm.vals<-all.vectors%>%as_tibble%>%mutate(dayminutes=hour(datetime)*60+minute(datetime))%>%
+  summarise(stop_lat.x.mean=mean(stop_lat.x,na.rm=T),stop_lat.x.sd=sd(stop_lat.x,na.rm=T),
+            stop_lon.x.mean=mean(stop_lon.x,na.rm=T),stop_lon.x.sd=sd(stop_lon.x,na.rm=T),
+            stop_lat.y.mean=mean(stop_lat.y,na.rm=T),stop_lat.y.sd=sd(stop_lat.y,na.rm=T),
+            stop_lon.y.mean=mean(stop_lon.y,na.rm=T),stop_lon.y.sd=sd(stop_lon.y,na.rm=T),
+            size.mean=mean(size,na.rm=T),size.sd=sd(size,na.rm=T),
+            dayminutes.mean=mean(dayminutes,na.rm=T),dayminutes.sd=sd(dayminutes,na.rm=T))
+
+
+stat<-data.frame()
+invisible(lapply(seq_along(res), function(i){
+  stat<<-bind_rows(stat,c(dt=names(res)[[i]], res[[i]]$stat))
+}))
+stat%<>%as_tibble%>%mutate(date=as.POSIXct(dt,format="%Y%m%d",tz="UTC"))%>%mutate(wd=as.factor(weekdays(date)),wday=wday(date))
+stat%>%group_by(wd)%>%summarise(m_ticket_count=mean(ticket_count),
+                                m_trip_count=mean(trip_count),
+                                m_matched_trip_count=mean(matched_trip_count),
+                                m_mobility_vector_count=mean(mobility_vector_count),
+                                m_mobility_vector_count/m_ticket_count)%>%write_csv("stat.csv")
+
+
 dist<-matrix(0,nrow=length(res), ncol=length(res))
 rownames(dist)<-names(res)
 colnames(dist)<-names(res)
-fsize<-1000
+fsize<-0
 for (d1 in names(res)){
   print(d1)
   for (d2 in names(res)){
@@ -133,62 +177,88 @@ for (d1 in names(res)){
       if (dist[d2,d1]>0){
         dist[d1,d2]<-dist[d2,d1]
       }else{
-        val<-pattern_distance(res[[d1]]$mobility.pattern,res[[d2]]$mobility.pattern,fsize)
+        val<-pattern_distance(res[[d1]]$mobility.pattern,res[[d2]]$mobility.pattern,norm.vals,fsize)
         dist[d1,d2]<-val
       }
     }
   } 
 }
-saveRDS(dist,paste0(folder,"distances.rds"))
+
+
+
+saveRDS(dist,paste0(folder,"distances-all6-0.rds"))
+dist<-readRDS(paste0(folder,"distances-all6-0.rds"))
+
 hc <- hclust(as.dist(dist), method = "complete" )
 plot(hc)
-d<-cutree(hc, k=4)
-d[d==2]
+ncl<-3
+d<-cutree(hc, k=ncl)
+
+kc <- kmeans(as.dist(dist), ncl)
+d<-kc$cluster
+
+plot_2d(data = dist, clusters = as.vector(kc$cluster), centroids_medoids = as.matrix(kc$withinss))
+Optimal_Clusters_KMeans(dist,max_clusters=20)
+summary(kc)
 
 fviz_nbclust(dist, kmeans, method = "wss") +
   geom_vline(xintercept = 4, linetype = 2)+
   labs(subtitle = "Elbow method")
 
-fviz_nbclust(dist, kmeans, method = "silhouette", k.max=10)+
+fviz_nbclust(dist, kmeans, method = "silhouette", k.max=20)+
   labs(subtitle = "Silhouette method")
 
-mobility%>%ggplot(aes(distance))+geom_density()
-daily.mobility_lim <- construct_daily_mobility(mobility%>%filter(distance>1000),day,list(c(5,11),c(11,15),c(15,24),c(NA)),10)
-pattern_distance(daily.mobility,daily.mobility_lim,0)
+set.seed(123)
+fviz_nbclust(dist, kmeans, nstart = 25,  method = "gap_stat", nboot = 50)+
+  labs(subtitle = "Gap statistic method")
 
-t1<-df[,c("stop_lat.x","stop_lon.x","stop_lat.y","stop_lon.y")]
-t2<-t1
-t2[1,]<-t1[4,]
-t2[4,]<-t1[2,]
-t2[2,]<-t1[1,]
-t2<-t2[-c(5),]
-t1<-t1[-c(10),]
-t2[1,]<-round(t2[1,])
-smint::closest(X=as.matrix(t1),XNew=as.matrix(t2))
-as.matrix(t2)
+Optimal_Clusters_GMM(dist, max_clusters = 30, criterion = "BIC", 
+                     dist_mode = "maha_dist", seed_mode = "random_subset",
+                     km_iter = 10, em_iter = 10, var_floor = 1e-10, 
+                     plot_data = T)
 
-bind_rows(res1$stat,res2$stat,res3$stat,res4$stat)
-res1<-readRDS(paste0(processed.folder,"20180102.rds"))
-res2<-readRDS(paste0(processed.folder,"20180103.rds"))
-res3<-readRDS(paste0(processed.folder,"20180106.rds"))
-res4<-readRDS(paste0(processed.folder,"20180107.rds"))
-
-source(file.path("TRA-2020-functions.R"))
-bind_rows(res1$stat,res2$stat,res3$stat,res4$stat)
-fsize<-1000
-pattern_distance(res1$mobility.pattern,res2$mobility.pattern,fsize)
-pattern_distance(res1$mobility.pattern,res1$mobility.pattern,fsize)
-
-pattern_distance(res1$mobility.pattern,res3$mobility.pattern,fsize)
-pattern_distance(res1$mobility.pattern,res4$mobility.pattern,fsize)
-pattern_distance(res2$mobility.pattern,res3$mobility.pattern,fsize)
-pattern_distance(res2$mobility.pattern,res4$mobility.pattern,fsize)
-pattern_distance(res3$mobility.pattern,res4$mobility.pattern,fsize)
+dd<-as_tibble(cbind(dt=names(d),cluster=d))%>%mutate(date=as.POSIXct(dt,format="%Y%m%d",tz="UTC"))%>%
+  mutate(wd=as.factor(weekdays(date)))
+dd%>%group_by(cluster,wd)%>%summarise(n=n())%>%spread("cluster", "n")
 
 
-res<-readRDS(paste0(processed.folder,"20180103.rds"))
+#dd%<>%mutate(cluster=ifelse(wd=="Saturday",1,ifelse(wd=="Sunday",2,ifelse(wd=="Friday",3,4))))
 
-df<-daily.mobility%>%mutate(label=ifelse(is.na(datetime),"return",format(datetime,"%H:%M")))%>%
+dd%>%filter(cluster==3, wd!="Saturday", wd!="Sunday")
+dd%>%filter(cluster==1, wd=="Saturday")
+dd%>%filter(cluster==3)
+
+interval<-74
+ma<-data.frame()
+for (i in seq(from=1,to=nrow(dd)-interval, by=7)){
+  mo<-dd[i:(i+interval),]
+  dt<-dd[i+interval/2,]$date
+  l<-list(date=dt)
+  for (cl in 1:ncl){
+    dts<-mo%>%filter(cluster==cl)%>%select(dt)%>%pull
+    l[[paste0("cluster",cl)]]<-sum(dist[dts,dts])/(length(dts)*(length(dts)-1))
+  }
+  ma<-bind_rows(ma,l)
+}
+str<-c(cluster1="Weekdays, pattern 1",cluster2="Weekdays, pattern 2",cluster3="Weekends")
+as_tibble(ma)%>%gather(key="cluster", value="distance", -date)%>%mutate(cluster=str[cluster])%>%
+  ggplot(aes(y=distance,x=date, group=cluster, color=cluster))+geom_line(size=2)+ylab("Within-cluster distance")
+
+dd%>%mutate(m=month(date))%>%group_by(cluster,m)%>%summarise(n())%>%print(n=50)
+
+dd%>%mutate(m=month(date))%>%group_by(cluster,m,wd)%>%summarise(n=n())%>%spread("m","n")%>%
+  filter(cluster!=3)%>%arrange(wd)
+
+dd%>%mutate(m=as.factor(month(date)))%>%group_by(cluster,m)%>%summarise(n=n())%>%spread("m","n")%>%
+  filter(cluster!=3)%>%arrange(cluster)
+dd%>%mutate(sea=(month(date)%%12)%/%3)%>%group_by(cluster,sea)%>%summarise(n=n())%>%spread("sea","n")%>%
+  filter(cluster!=3)%>%arrange(cluster)
+
+dd%>%filter(cluster!=3)%>%ggplot(aes(x=date, y=cluster,group=1))+geom_line()
+
+
+
+df<-res[["20180130"]]$mobility.pattern%>%mutate(label=ifelse(size>1500,ifelse(is.na(datetime),"back",format(datetime,"%H:%M")),NA))%>%
   mutate(weight=3+round(10*(size-min(size))/(max(size)-min(size))))
 m <- leaflet() %>%addTiles()
 for(i in 1:nrow(df)){
@@ -202,10 +272,10 @@ for(i in 1:nrow(df)){
 m
 
 
-df<-mobility%>%filter(card_number=="53372409")
+df<-mobility%>%filter(card_number=="53372409")%>%mutate(label=ifelse(is.na(datetime),"back",format(datetime,"%H:%M")))
 m <- leaflet() %>%addTiles()
 for(i in 1:nrow(df)){
-  m%<>%addPolylines(label=as.character(df[i, "datetime"]),labelOptions = labelOptions(noHide = T),
+  m%<>%addPolylines(label=as.character(df[i, "label"]),labelOptions = labelOptions(noHide = T),
                     lat = as.numeric(df[i, c("stop_lat.x", "stop_lat.y")]), 
                     lng = as.numeric(df[i, c("stop_lon.x", "stop_lon.y")]))%>%
     addCircleMarkers(lat = as.numeric(df[i, c("stop_lat.y")]), 
@@ -214,128 +284,82 @@ for(i in 1:nrow(df)){
 m
 
 
-needs(factoextra)
-needs(NbClust)
-
-fviz_nbclust(vect, kmeans, method = "wss") +
-  geom_vline(xintercept = 4, linetype = 2)+
-  labs(subtitle = "Elbow method")
-
-fviz_nbclust(vect%>%sample_n(1000), kmeans, method = "silhouette", k.max=900)+
-  labs(subtitle = "Silhouette method")
-
-#set.seed(123)
-#fviz_nbclust(df, kmeans, nstart = 25,  method = "gap_stat", nboot = 50)+
-  labs(subtitle = "Gap statistic method")
-
-x
 
 
 
-
-
-
-
-needs(dbscan)
-
+# routes <- data[['routes_df']] %>%
+# #  slice(which(grepl('a|b', route_id, ignore.case=TRUE))) %>%
+#   '$'('route_id')
 # 
-# test<-mobility%>%mutate(X1=ifelse(is.na(datetime),0,as.numeric(datetime)))%>%
-#   mutate(X2=as.numeric(stop_lat.x))%>%
-#   mutate(X3=as.numeric(stop_lon.x))%>%
-#   mutate(X4=as.numeric(stop_lat.y))%>%
-#   mutate(X5=as.numeric(stop_lon.y))
 # 
-# vect<-test%>%mutate(X1norm=(X1-mean(X1))/sd(X1))%>%
-#   mutate(X2norm=(X2-mean(X2))/sd(X2))%>%mutate(X3norm=(X3-mean(X3))/sd(X3))%>%mutate(X4norm=(X4-mean(X4))/sd(X4))%>%mutate(X5norm=(X5-mean(X5))/sd(X5))%>%
-#   select(X1norm,X2norm,X3norm,X4norm,X5norm)
+# cols<-routes
+# cols<-cols%>%replace(startsWith(.,prefix="riga_bus"),"blue")%>%replace(startsWith(.,prefix="riga_tram"),"red")%>%replace(startsWith(.,prefix="riga_trol"),"green")
 # 
-# kNNdistplot(vect, k = 20)
-# res <- dbscan(vect, eps = .5, minPts = 20)
-# res
-# test$cluster<-res$cluster
-# test%<>%group_by(cluster)%>%summarize(stop_lat.x=mean(stop_lat.x,na.rm=T),stop_lon.x=mean(stop_lon.x,na.rm=T),
-#                                       stop_lat.y=mean(stop_lat.y,na.rm=T),stop_lon.y=mean(stop_lon.y,na.rm=T),
-#                                       size=n(),
-#                                       datetime=median(datetime))
-
-
-
-
-
-
-routes <- data[['routes_df']] %>%
-#  slice(which(grepl('a|b', route_id, ignore.case=TRUE))) %>%
-  '$'('route_id')
-
-
-cols<-routes
-cols<-cols%>%replace(startsWith(.,prefix="riga_bus"),"blue")%>%replace(startsWith(.,prefix="riga_tram"),"red")%>%replace(startsWith(.,prefix="riga_trol"),"green")
-
-m<-data %>% map_gtfs(route_ids = routes, route_colors = cols, include_stops = F, route_opacity = 0.5)
-m$height <- '1000'
-options(viewer = NULL)
-
-Sys.setlocale(category = "LC_ALL", locale = "") 
-
-m%>% leaflet::clearControls() %>% leaflet::addCircleMarkers(
-  label = stops$stop_name,
-  radius = 2,
-  stroke = TRUE,
-  opacity = 0.5,
-  weight = 1,
-  color = 'grey',
-  fill = TRUE,
-  fillColor = "pink",
-  fillOpacity = 0.9,
-  lat = stops$stop_lat,
-  lng = stops$stop_lon)
-
-
-
-ids <- data$trips_df %>%
-  select(trip_id,route_id, service_id, shape_id) %>%
-  distinct() %>%
-  filter(route_id %in% routes)
-
-ids %<>% filter(route_id=="riga_tram_11")
-
-route_ids <- ids$route_id[1]
-service_ids <- ids$service_id[1]
-shape_ids <- ids$shape_id[1]
-
-stop_ids<-data[['stop_times_df']]%>%filter(trip_id==ids$trip_id[1])%>%pull(stop_id)
-stops<-data[['stops_df']]%>%filter(stop_id %in% stop_ids)
-# lets map the specific data with some other options enabled.
-m<-data %>%
-  map_gtfs(route_ids = route_ids,
-           service_ids = service_ids,
-           shape_ids = shape_ids,
-           route_colors = 'blue', # set the route color
-           stop_details = TRUE, # get more stop details on click
-           route_opacity = .5, include_stops = F)
-
-m$height <- '1000'
-
-m%>% leaflet::clearControls() %>% leaflet::addCircleMarkers(
-  label = stops$stop_name,
-  radius = 2,
-  stroke = TRUE,
-  opacity = 0.5,
-  weight = 1,
-  color = 'grey',
-  fill = TRUE,
-  fillColor = "pink",
-  fillOpacity = 0.9,
-  lat = stops$stop_lat,
-  lng = stops$stop_lon)
-
-
-
-stat <- read_delim(paste0(getwd(),"/RigasKarte/2018-summary.csv"),"\t", col_types = "ciii")
-needs(tidyr)
-needs(ggplot2)
-stat%>%gather(key="mode", value="passengers", -month)
-ggplot(data=stat%>%gather(key="mode", value="passengers", -month), aes(x=month, y=passengers, group=mode, fill=mode)) +
-  scale_x_discrete(expand = c(0, 0)) +
-  scale_y_continuous(expand = c(0, 0)) +
-  geom_area(alpha=0.6)+scale_fill_manual(values=c("blue", "red", "green"))
+# m<-data %>% map_gtfs(route_ids = routes, route_colors = cols, include_stops = F, route_opacity = 0.5)
+# m$height <- '1000'
+# options(viewer = NULL)
+# 
+# Sys.setlocale(category = "LC_ALL", locale = "") 
+# 
+# m%>% leaflet::clearControls() %>% leaflet::addCircleMarkers(
+#   label = stops$stop_name,
+#   radius = 2,
+#   stroke = TRUE,
+#   opacity = 0.5,
+#   weight = 1,
+#   color = 'grey',
+#   fill = TRUE,
+#   fillColor = "pink",
+#   fillOpacity = 0.9,
+#   lat = stops$stop_lat,
+#   lng = stops$stop_lon)
+# 
+# 
+# 
+# ids <- data$trips_df %>%
+#   select(trip_id,route_id, service_id, shape_id) %>%
+#   distinct() %>%
+#   filter(route_id %in% routes)
+# 
+# ids %<>% filter(route_id=="riga_tram_11")
+# 
+# route_ids <- ids$route_id[1]
+# service_ids <- ids$service_id[1]
+# shape_ids <- ids$shape_id[1]
+# 
+# stop_ids<-data[['stop_times_df']]%>%filter(trip_id==ids$trip_id[1])%>%pull(stop_id)
+# stops<-data[['stops_df']]%>%filter(stop_id %in% stop_ids)
+# # lets map the specific data with some other options enabled.
+# m<-data %>%
+#   map_gtfs(route_ids = route_ids,
+#            service_ids = service_ids,
+#            shape_ids = shape_ids,
+#            route_colors = 'blue', # set the route color
+#            stop_details = TRUE, # get more stop details on click
+#            route_opacity = .5, include_stops = F)
+# 
+# m$height <- '1000'
+# 
+# m%>% leaflet::clearControls() %>% leaflet::addCircleMarkers(
+#   label = stops$stop_name,
+#   radius = 2,
+#   stroke = TRUE,
+#   opacity = 0.5,
+#   weight = 1,
+#   color = 'grey',
+#   fill = TRUE,
+#   fillColor = "pink",
+#   fillOpacity = 0.9,
+#   lat = stops$stop_lat,
+#   lng = stops$stop_lon)
+# 
+# 
+# 
+# stat <- read_delim(paste0(getwd(),"/RigasKarte/2018-summary.csv"),"\t", col_types = "ciii")
+# needs(tidyr)
+# needs(ggplot2)
+# stat%>%gather(key="mode", value="passengers", -month)
+# ggplot(data=stat%>%gather(key="mode", value="passengers", -month), aes(x=month, y=passengers, group=mode, fill=mode)) +
+#   scale_x_discrete(expand = c(0, 0)) +
+#   scale_y_continuous(expand = c(0, 0)) +
+#   geom_area(alpha=0.6)+scale_fill_manual(values=c("blue", "red", "green"))
