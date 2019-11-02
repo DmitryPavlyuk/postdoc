@@ -66,7 +66,7 @@ starForecast <-function(sampl, forecastingSteps, arLags, matrixMode=NULL, contro
                                  series,include.mean=include.mean)+fixed
       if ("glasso" %in% matrixMode) fixed <- glassoFixed(sampl,names(sampl),maxLag=arLags,rho=control$glassoRho,
                                   include.mean=include.mean)+fixed
-      if ("rf" %in% matrixMode) fixed <- rfFixed(sampl,names(sampl),maxLag=arLags,n=control$nfeatures,
+      if ("rf" %in% matrixMode) fixed <- rfFixed(sampl,names(sampl),maxLag=arLags,n=control$nfeatures,fs=control$fs,
                                                          include.mean=include.mean)+fixed
       if ("CCF" %in% matrixMode) fixed <- prepareFixed(constructCorMatrix(sampl,names(sampl),maxLag=arLags,threshold=control$ccfThreshold), arLags, 0,
                                 series, include.mean=include.mean)+fixed
@@ -86,7 +86,7 @@ starForecast <-function(sampl, forecastingSteps, arLags, matrixMode=NULL, contro
       fixed <- prepareFixed(control$lagMatrix, arLags, 0,
                             series,include.mean=include.mean)
     }else if (matrixMode == "rf"){
-      fixed <- rfFixed(sampl,names(sampl),maxLag=arLags,n=control$nfeatures, include.mean=include.mean)
+      fixed <- rfFixed(sampl,names(sampl),maxLag=arLags,n=control$nfeatures, fs=control$fs, include.mean=include.mean)
     }else if (matrixMode == "univariate"){
       fixed <- univariateFixed(sampl,names(sampl),maxLag=arLags, include.mean=include.mean)
     }
@@ -195,7 +195,7 @@ glassoFixed <- function(data, series, maxLag=3,rho=0.5, include.mean=F){
   return (res)
 }
 
-rfFixed <- function(data, series, maxLag=3,n=20, include.mean=F){
+rfFixed <- function(data, series, maxLag=3,n=20, fs="IncMSE", include.mean=F){
   univariateF<-univariateFixed(data, series, maxLag,include.mean)
   orig <- data[,series]
   orig.names<-series
@@ -216,19 +216,41 @@ rfFixed <- function(data, series, maxLag=3,n=20, include.mean=F){
   }
   rownames(res) <- rnames
   colnames(res) <- cnames
-  
+  all_features <- tibble()
   for (s in series){
     fstr<-paste(s,"~",paste(rnames,sep="", collapse = '+'))
     d <-dat
     d[[s]]<- shift(d[[s]], 5)
     d<-head(d, -5)
-    rf <- randomForest::randomForest(as.formula(fstr), d,importance = T, ntree=((maxLag*length(series)) %/% 3))
-    features<-randomForest::importance(rf)%>%as.data.frame%>%rownames_to_column%>%filter(`%IncMSE`>0)
-    tot<-nrow(features)
-    features<-features%>%arrange(desc(`%IncMSE`))%>%slice(1:(n*maxLag))%>%select(rowname)%>%pull
-    #features<-importance(rf)%>%as.data.frame%>%rownames_to_column%>%filter(`%IncMSE`>n)%>%select(rowname)%>%pull
-    print(paste("Selected features",length(features),"from",tot))
-    res[features, s]<-1
+    tot<-0
+    features<-c()
+    if (fs=="boruta"){
+      rf<-Boruta(as.formula(fstr), d)
+      fd<-rf$finalDecision
+      features<-names(fd[fd=="Confirmed"])
+      tot<-length(rnames)
+      print(paste("Selected features",length(features),"from",tot))
+      res[features, s]<-1
+    }else if (fs=="system-wide"){
+      rf <- randomForest::randomForest(as.formula(fstr), d,importance = T, ntree=((maxLag*length(series)) %/% 3))
+      features<-randomForest::importance(rf)%>%as.data.frame%>%rownames_to_column("rn")%>%filter(`%IncMSE`>0)
+      all_features <- bind_rows(all_features, features%>%mutate(s=s))
+    }else{
+      rf <- randomForest::randomForest(as.formula(fstr), d,importance = T, ntree=((maxLag*length(series)) %/% 3))
+      features<-randomForest::importance(rf)%>%as.data.frame%>%rownames_to_column%>%filter(`%IncMSE`>0)
+      tot<-nrow(features)
+      features<-features%>%arrange(desc(`%IncMSE`))%>%slice(1:(n*maxLag))%>%select(rowname)%>%pull
+      print(paste("Selected features",length(features),"from",tot))
+      res[features, s]<-1
+    }
+  }
+  print(nrow(all_features))
+  if (fs=="system-wide"){
+    all_features%<>%arrange(desc(`%IncMSE`))%>%slice(1:(n*maxLag*length(series)))
+    for (i in 1:nrow(all_features)){
+      res[all_features[i,]$rn, all_features[i,]$s]<-1
+    }
+    print(paste("Total number of features:",nrow(all_features)))
   }
   res<-res+univariateF
   rownames(res) <- rnames
@@ -259,7 +281,7 @@ xModel.star <- list(
   name="STAR",
   run = starForecast,
   functions = c('prepareFixed','constructCorMatrix','univariateFixed','glassoFixed','randomStr',"rfFixed","shift"),
-  packages = c('tidyverse','matrixStats','tseries','e1071','MTS','glasso','randomForest','tibble')
+  packages = c('tidyverse','matrixStats','tseries','e1071','MTS','glasso','randomForest','Boruta','tibble')
 )
 
 
