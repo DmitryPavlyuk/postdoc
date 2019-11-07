@@ -1,7 +1,7 @@
 ---
 title: "Postdoc project 1.1.1.2/VIAA/1/16/112"
 author: "Dmitry Pavlyuk"
-date: "February 6, 2019"
+date: "Feb 6 - Aug 22, 2019"
 output: html_document
 ---
 
@@ -27,3 +27,4 @@ See [data transformation markdown](./data_transformation.Rmd) for transformation
 4. Conference- or article-specific markdowns
     + 22nd Euro Working Group on Transportation Meeting - EWGT 2019 [markdown](./EWGT2019.Rmd) https://ewgt19.upc.edu/en
     + 6th International conference on Time Series and Forecasting - ITISE 2019 [markdown](./ITISE2019.Rmd) http://itise.ugr.es/
+    + 19th International Multi-Conference Reliability and Statistics in Transportation and Communication - RelStat-2019 [markdown](./RelStat2019.Rmd) http://relstat2019.tsi.lv/

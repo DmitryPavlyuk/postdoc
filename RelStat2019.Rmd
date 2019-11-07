@@ -25,6 +25,7 @@ needs(imager)
 needs(magrittr)
 needs(RColorBrewer)
 needs(TSdist)
+needs(asymmetry)
 
 ```
 ```{r load_data}
@@ -133,4 +134,75 @@ dev.off()
 
 num<-num+1
 }
+```
+
+
+```{r image}
+#Shortest
+d<-mysample$shortest.distances
+
+#Cross-corr
+dat<-mysample$data[,series]
+dat<-as_tibble(cbind(t(dat)))%>%as.data.frame
+rownames(dat)<-node.names
+d<-TSDatabaseDistances(dat, "dtw")
+d<-as.matrix(d)
+
+#Geo
+nodes <- config.nodes %>% filter(node_name %in% node.names)
+needs(geosphere)
+d<- distm(nodes%>%select(node_lon,node_lat), fun = distHaversine)
+rownames(d)<-nodes%>%select(node_name)%>%pull
+
+
+diag(d)<-0
+d[d==Inf]<-max(d[d<Inf])
+
+#fit<-asymscal(d, ndim = 2, itmax = 10000, eps = 1e-10)
+#plot(fit$cweights[,1])
+#v<-as_tibble(fit$cweights[,1])
+#v$node<-node.names
+#v$V1<-v$value
+
+fit <- cmdscale(d,eig=TRUE, k=1)
+v<-as_tibble(fit$points,rownames="node")
+v<-v %>% mutate(rank = dense_rank(desc(V1)))%>%select(node,rank)
+
+minintensity <- min(mysample$data[,series])
+maxintensity <- max(mysample$data[,series])
+minintensity <- -100
+maxintensity <- 100
+m<-matrix(NA,nrow(mysample$data),nrow(v))
+for (i in seq(1,nrow(mysample$data),by=1)){
+  vals <- mysample$data[i,series]
+  colnames(vals)<-node.names
+  vals <- vals%>%gather(node.names,key='node', value='value')
+  pixels<-v%>%left_join(vals, by=c("node"="node"))
+  for (j in seq(1,nrow(pixels))){
+    m[i,as.integer(pixels[j,"rank"])] = 
+      (as.integer(pixels[j,"value"])-minintensity)/(maxintensity-minintensity)
+  }
+}  
+
+im.width<- 84*8
+im.height<- 60*8
+#png(file.path(imfolder,paste0(sprintf("%010d", num),".png")), width = im.width, height=im.height)
+par(mar=c(0,0,1,0))
+
+cool = rainbow(10, start=rgb2hsv(col2rgb('cyan'))[1], end=rgb2hsv(col2rgb('blue'))[1])
+warm = rainbow(10, start=rgb2hsv(col2rgb('red'))[1], end=rgb2hsv(col2rgb('yellow'))[1])
+cols = c(rev(cool),"#CCCCCC", rev(warm))
+
+mypalette <- colorRampPalette(cols)(255)
+
+image(m, useRaster=FALSE, axes=FALSE, col=mypalette, zlim=c(0,1))
+dev.off()
+
+nb <- nb2listw(cell2nb(nrow=nrow(m), ncol=ncol(m), type="queen"), style="W")
+moran.test(c(m),nb,alternative="two.sided")
+
+
+nexp<-nodes%>%select(node_name,node_lon,node_lat)
+nexp$node_name<-gsub("rnd_","",nexp$node_name)
+
 ```

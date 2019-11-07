@@ -1,190 +1,365 @@
 rm(list=ls())
-memory.limit(size=1024*128)
 
-if (!require(devtools)) {
-  install.packages('devtools')
-}
-if (!require(needs)) {
-  install.packages('needs')
-}
+if (!require(devtools)) install.packages('devtools')
+if (!require(needs)) install.packages('needs')
 devtools::install_github('ropensci/gtfsr')
+devtools::install_github("IRSN/smint")
 require(needs)
+needs(smint)
 needs(gtfsr)
 needs(magrittr)
 needs(dplyr)
 needs(tibble)
 needs(readr)
+needs(lubridate)
+needs(ggplot2)
+needs(leaflet)
+needs(factoextra)
+needs(NbClust)
+needs(ClusterR)
+needs(tidyverse)
+options(viewer = NULL)
 
+source(file.path("TRA-2020-functions.R"))
 
 set_api_key()
 #4cf79c4e-6afc-4e4e-b8bf-1eb6b0d88d1f
 
-# get the feedlist dataframe
-feedlist_df <- get_feedlist() %>%filter(grepl('Riga', id, ignore.case= TRUE))
-data <- import_gtfs(feedlist_df$url_d)
+raw.folder<-paste0(getwd(),"/RK/Validations-Dump_2018/")
+raw.rds.folder<-paste0(getwd(),"/RK/prepared/")
+processed.folder<-paste0(getwd(),"/RK/processed/")
+gtfs.folder<-paste0(getwd(),"/RK/gtfs/")
+daily.folder<-paste0(getwd(),"/RK/daily/")
+folder<-paste0(getwd(),"/RK/")
 
-data <- import_gtfs("https://openmobilitydata-data.s3-us-west-1.amazonaws.com/public/feeds/rigas-satiksme/333/20180129/gtfs.zip")
-
-
-#tickets<-read_delim(paste0(getwd(),"/RigasKarte/export2.csv"),";", col_types = "Tccicccic")
-folder<-paste0(getwd(),"/RK/Validations-Dump_2018/")
-data<-tibble()
-c <- 1
-for (file in list.files(folder)){
-  print(file)
-  tickets<-read_delim(paste0(folder,file),";", col_types = "Tcccicccccc", 
-                      col_names=c("datetime","tick","route_name", "route_direction","transport_id","ticket_type","mode","card_number","route_number","transport_code","code"))
-  data <- bind_rows(data,tickets)
-  c<-c+1
-  if (c %% 10 == 0){
-    saveRDS(data, paste0(folder,"data",c,".rds"))
-    data<-tibble()
+if (!dir.exists(daily.folder)){
+  data.complete.file <- paste0(folder,"complete.rds")
+  data.complete <- load_complete_data(data.complete.file, raw.folder, raw.rds.folder)
+  day<-as.Date("2018-01-01",format="%Y-%m-%d",tz="UTC")
+  end_date<-as.Date("2018-12-31",format="%Y-%m-%d",tz="UTC")
+  while(day<=end_date){
+    print(paste("---",day,"---"))
+    data.day <- data.complete%>%filter(date>=day,date<(day+1))
+    if (nrow(data.day)>100000){
+      print("saving")
+      saveRDS(data.day, paste0(daily.folder,format(day,"%Y%m%d"),".rds"))
+    }else{
+      print("seems incomplete, skipping")
+    }
+    day<-day+1
   }
+  data.daily<-data.complete%>%group_by(date)%>%summarize(n=n())
+  my.travels<-data.complete%>%filter(card_number=="53372409")
+  saveRDS(my.travels,paste0(folder,"my-travels.rds"))
+}else{
+  my.travels<-readRDS(paste0(folder,"my-travels.rds"))
 }
-saveRDS(data, paste0(folder,"data",c,".rds"))
-data<-tibble()
-for (file in list.files(folder, pattern="\\.rds$")){
-  print(file)
-    d<-readRDS(paste0(folder,file))
-    data <- bind_rows(data,d)
+
+
+my.travels%>%group_by(date)%>%summarize(n=n())%>%print(n=20)
+my.travels%>%filter(date==ymd(20180207))%>%arrange(datetime)
+#cday<-ymd(20180207)
+cday<-ymd(20180129)
+
+if (!dir.exists(processed.folder)) dir.create(processed.folder)
+
+cday<-as.Date("2018-01-01",format="%Y-%m-%d",tz="UTC")
+end_date<-as.Date("2018-12-31",format="%Y-%m-%d",tz="UTC")
+while(cday<=end_date){ 
+  day <- format(cday,"%Y-%m-%d")
+  print(paste("---",day,"---"))
+  day.d<-as.POSIXct(day,format="%Y-%m-%d",tz="UTC")
+  data.file<-paste0(daily.folder,format(day.d,"%Y%m%d"),".rds")
+  if (!file.exists(data.file)){
+    print("No data, skipping");
+    cday<-cday+1
+    next;
+  }
+  data.day <- readRDS(data.file)
+  
+  #data.day%>%filter(card_number=="53372409")%>%arrange(datetime)
+  #data.day%>%filter(card_number=="53372409")%>%arrange(datetime)%>%select(datetime, trip_id, first_reg, last_reg,transport_code)
+  #mobility <- process_day(data.day, day, url)
+  
+  stat<-list()
+  stat$ticket_count<-data.day%>%nrow
+  
+  data.day<-estimate_trips(data.day)
+  data.day%>%ungroup%>%summarise(tickets=n(),trips=n_distinct(trip_id))
+  stat$trip_count<-data.day%>%ungroup%>%summarise(trips=n_distinct(trip_id))%>%select(trips)%>%pull
+  
+  
+  data<-load_schedule(gtfs.folder, day)
+  
+  data.day<-match_trips(data.day, data, day)
+  data.day%>%ungroup%>%summarise(tickets=n(),trips=n_distinct(trip_id), matched_trips=n_distinct(trip_id.y))
+  
+  stat$matched_trip_count<-data.day%>%nrow
+  
+  #data.day%>%filter(card_number=="53372409")%>%arrange(datetime)%>%select(datetime, trip_id, trip_id.y, stop_name)
+  
+  data.chains<-find_chains(data.day)
+  
+  #data.chains%>%filter(card_number=="53372409")
+  stat$chain_count<-data.chains%>%ungroup%>%summarise(chains=n_distinct(chain_id))%>%select(chains)%>%pull
+  
+  #mobility%>%filter(card_number=="53372409")
+  
+  mobility<-find_mobility_vectors(data.chains)
+  stat$mobility_vector_count<-mobility%>%nrow
+  stat$mobility_total_distance<-mobility%>%ungroup%>%summarise(dist=sum(distance))%>%select(dist)%>%pull
+  
+ 
+  df<-mobility%>%filter(card_number=="53372409")%>%mutate(label=ifelse(is.na(datetime),"back",format(datetime,"%H:%M")))
+  if (nrow(df)>0){
+    m <- leaflet() %>%addTiles()
+  for(i in 1:nrow(df)){
+    m%<>%addPolylines(label=as.character(df[i, "label"]),labelOptions = labelOptions(noHide = T),
+                      lat = as.numeric(df[i, c("stop_lat.x", "stop_lat.y")]), 
+                      lng = as.numeric(df[i, c("stop_lon.x", "stop_lon.y")]))%>%
+      addCircleMarkers(lat = as.numeric(df[i, c("stop_lat.y")]), 
+                       lng = as.numeric(df[i, c("stop_lon.y")]),radius=4,color="#F30")
+  }
+  print(m)
+  }
+  
+  daily.mobility <- construct_daily_mobility(mobility%>%filter(distance>1000),day,list(c(5,11),c(11,15),c(15,24),c(NA)),10)
+  #daily.mobility <- construct_daily_mobility(mobility,day,list(c(5,24),c(NA)),30)
+  result<-list(stat=stat, data.chains=data.chains, mobility=mobility, mobility.pattern=daily.mobility)
+  saveRDS(result,paste0(processed.folder,format(cday,"%Y%m%d"),".rds"))
+  cday<-cday+1
 }
-saveRDS(data, paste0(folder,"complete.rds"))
-
-data <- readRDS(paste0(folder,"complete.rds"))
-
-sample<-data[1:10000,]
-saveRDS(sample, paste0(folder,"sample.rds"))
-
-needs(lubridate)
-data%<>%mutate(date=ymd(format(datetime-3*60*60, format="%Y%m%d",tz="GMT")))
-saveRDS(data, paste0(folder,"complete.rds"))
-
-data.daily<-data%>%group_by(date)%>%summarize(n=n())
-data.day <- data%>%filter(date>ymd(20180610),date<ymd(20180618))
-data.day%<>%mutate(mode=ifelse(mode=="Train" & as.integer(route_number)>100, "Urban bus", mode))
-data.day%<>%filter(mode!="Train")
-data.day%>%filter(mode=="Indeterminated")%>%select(route_name, route_number)%>%print(n=1000)
-data.day%<>%mutate(mode=ifelse(mode=="Indeterminated", "Tramway", mode))
-
-
-data.day%<>%mutate(minute=round_date(datetime,"10 mins"))
-needs(ggplot2)
-ggplot(data=data.day%>%group_by(minute)%>%summarize(n=n()), aes(x=minute, y=n)) +  geom_line()
-ggplot(data=data.day%>%group_by(date,minute, mode)%>%summarize(n=n()), aes(x=minute, y=n, group=mode, color=mode)) +  geom_line()
 
 
 
-summary(data.day)
-mode_ass<-c(Tramway="tram", `Urban bus`="bus", Trolleybus="trol")
-data.day$mode<-as.factor(data.day$mode)
-data.day%<>%mutate(route_id=paste("riga",mode_ass[mode],route_number,sep="_"))
+source(file.path("TRA-2020-functions.R"))
 
-data.day%>%group_by(card_number)%>%summarise(n=n())%>%arrange(desc(n))%>%filter(n>1)%>%print(n=100)
-data.day%>%arrange(datetime)%>%filter(card_number=="2030760589")%>%print(n=50)
-
-
+fs <- gsub(".rds","",sort(list.files(processed.folder, pattern="\\.rds$",full.names=F)))
+res<-list()
+for (file in fs){
+  res[[file]]<-readRDS(paste0(processed.folder,file,".rds"))
+}
 
 
-data[['routes_df']] <- data[['routes_df']]%>%rename(route_id=1)
-data[['trips_df']] <- data[['trips_df']]%>%rename(route_id=1)
-data[['stops_df']] <- data[['stops_df']]%>%rename(stop_id=1)
-data[['stop_times_df']] <- data[['stop_times_df']]%>%rename(trip_id=1)
-data[['shapes_df']] <- data[['shapes_df']]%>%rename(shape_id=1)
-data[['calendar_df']] <- data[['calendar_df']]%>%rename(service_id=1)
-data[['calendar_dates_df']] <- data[['calendar_dates_df']]%>%rename(service_id=1)
-data[['agency_df']] <- data[['agency_df']]%>%rename(agency_id=1)%>%mutate(agency_name="Rigas Satiksme")
+all.vectors<-data.frame()
+invisible(lapply(seq_along(res), function(i){
+  all.vectors<<-bind_rows(all.vectors,res[[i]]$mobility.pattern)
+}))
+norm.vals<-all.vectors%>%as_tibble%>%mutate(dayminutes=hour(datetime)*60+minute(datetime))%>%
+  summarise(stop_lat.x.mean=mean(stop_lat.x,na.rm=T),stop_lat.x.sd=sd(stop_lat.x,na.rm=T),
+            stop_lon.x.mean=mean(stop_lon.x,na.rm=T),stop_lon.x.sd=sd(stop_lon.x,na.rm=T),
+            stop_lat.y.mean=mean(stop_lat.y,na.rm=T),stop_lat.y.sd=sd(stop_lat.y,na.rm=T),
+            stop_lon.y.mean=mean(stop_lon.y,na.rm=T),stop_lon.y.sd=sd(stop_lon.y,na.rm=T),
+            size.mean=mean(size,na.rm=T),size.sd=sd(size,na.rm=T),
+            dayminutes.mean=mean(dayminutes,na.rm=T),dayminutes.sd=sd(dayminutes,na.rm=T))
 
 
-tickets%<>%left_join(routes_df,by=c("route_id"))
-tickets%>%group_by(produit)%>%summarise(first_validation=min(datetime), last_validation=max(datetime))
-
-tickets%>%filter(produit==31212 )%>%arrange(produit, datetime)%>%mutate(sw=(lag(direction)==direction))%>%print(n=40)
-
-
-%>%select(datetime,route_name,route_id, date, service_id)
-
-
-data[['routes_df']]%>%filter(route_id=="riga_tram_11")
-
-routes <- data[['routes_df']] %>%
-#  slice(which(grepl('a|b', route_id, ignore.case=TRUE))) %>%
-  '$'('route_id')
+stat<-data.frame()
+invisible(lapply(seq_along(res), function(i){
+  stat<<-bind_rows(stat,c(dt=names(res)[[i]], res[[i]]$stat))
+}))
+stat%<>%as_tibble%>%mutate(date=as.POSIXct(dt,format="%Y%m%d",tz="UTC"))%>%mutate(wd=as.factor(weekdays(date)),wday=wday(date))
+stat%>%group_by(wd)%>%summarise(m_ticket_count=mean(ticket_count),
+                                m_trip_count=mean(trip_count),
+                                m_matched_trip_count=mean(matched_trip_count),
+                                m_mobility_vector_count=mean(mobility_vector_count),
+                                m_mobility_vector_count/m_ticket_count)%>%write_csv("stat.csv")
 
 
-cols<-routes
-cols<-cols%>%replace(startsWith(.,prefix="riga_bus"),"blue")%>%replace(startsWith(.,prefix="riga_tram"),"red")%>%replace(startsWith(.,prefix="riga_trol"),"green")
-
-m<-data %>% map_gtfs(route_ids = routes, route_colors = cols, include_stops = F, route_opacity = 0.5)
-m$height <- '1000'
-options(viewer = NULL)
-
-
-data[['stops_df']]%>%inner_join(data[['stop_times_df']],by = "stop_id")%>%inner_join(data[['trips_df']],by = "trip_id")%>%group_by(stop_id, stop_name)%>%
-  summarise(n=n())
-
-stops <- data[['stops_df']]
-
-Sys.setlocale(category = "LC_ALL", locale = "") 
-
-m%>% leaflet::clearControls() %>% leaflet::addCircleMarkers(
-  label = stops$stop_name,
-  radius = 2,
-  stroke = TRUE,
-  opacity = 0.5,
-  weight = 1,
-  color = 'grey',
-  fill = TRUE,
-  fillColor = "pink",
-  fillOpacity = 0.9,
-  lat = stops$stop_lat,
-  lng = stops$stop_lon)
+dist<-matrix(0,nrow=length(res), ncol=length(res))
+rownames(dist)<-names(res)
+colnames(dist)<-names(res)
+fsize<-0
+for (d1 in names(res)){
+  print(d1)
+  for (d2 in names(res)){
+    if (d1!=d2){
+      if (dist[d2,d1]>0){
+        dist[d1,d2]<-dist[d2,d1]
+      }else{
+        val<-pattern_distance(res[[d1]]$mobility.pattern,res[[d2]]$mobility.pattern,norm.vals,fsize)
+        dist[d1,d2]<-val
+      }
+    }
+  } 
+}
 
 
 
-ids <- data$trips_df %>%
-  select(trip_id,route_id, service_id, shape_id) %>%
-  distinct() %>%
-  filter(route_id %in% routes)
+saveRDS(dist,paste0(folder,"distances-all6-0.rds"))
+dist<-readRDS(paste0(folder,"distances-all6-0.rds"))
 
-ids %<>% filter(route_id=="riga_tram_11")
+hc <- hclust(as.dist(dist), method = "complete" )
+plot(hc)
+ncl<-3
+d<-cutree(hc, k=ncl)
 
-route_ids <- ids$route_id[1]
-service_ids <- ids$service_id[1]
-shape_ids <- ids$shape_id[1]
+kc <- kmeans(as.dist(dist), ncl)
+d<-kc$cluster
 
-stop_ids<-data[['stop_times_df']]%>%filter(trip_id==ids$trip_id[1])%>%pull(stop_id)
-stops<-data[['stops_df']]%>%filter(stop_id %in% stop_ids)
-# lets map the specific data with some other options enabled.
-m<-data %>%
-  map_gtfs(route_ids = route_ids,
-           service_ids = service_ids,
-           shape_ids = shape_ids,
-           route_colors = 'blue', # set the route color
-           stop_details = TRUE, # get more stop details on click
-           route_opacity = .5, include_stops = F)
+plot_2d(data = dist, clusters = as.vector(kc$cluster), centroids_medoids = as.matrix(kc$withinss))
+Optimal_Clusters_KMeans(dist,max_clusters=20)
+summary(kc)
 
-m$height <- '1000'
+fviz_nbclust(dist, kmeans, method = "wss") +
+  geom_vline(xintercept = 4, linetype = 2)+
+  labs(subtitle = "Elbow method")
 
-m%>% leaflet::clearControls() %>% leaflet::addCircleMarkers(
-  label = stops$stop_name,
-  radius = 2,
-  stroke = TRUE,
-  opacity = 0.5,
-  weight = 1,
-  color = 'grey',
-  fill = TRUE,
-  fillColor = "pink",
-  fillOpacity = 0.9,
-  lat = stops$stop_lat,
-  lng = stops$stop_lon)
+fviz_nbclust(dist, kmeans, method = "silhouette", k.max=20)+
+  labs(subtitle = "Silhouette method")
+
+set.seed(123)
+fviz_nbclust(dist, kmeans, nstart = 25,  method = "gap_stat", nboot = 50)+
+  labs(subtitle = "Gap statistic method")
+
+Optimal_Clusters_GMM(dist, max_clusters = 30, criterion = "BIC", 
+                     dist_mode = "maha_dist", seed_mode = "random_subset",
+                     km_iter = 10, em_iter = 10, var_floor = 1e-10, 
+                     plot_data = T)
+
+dd<-as_tibble(cbind(dt=names(d),cluster=d))%>%mutate(date=as.POSIXct(dt,format="%Y%m%d",tz="UTC"))%>%
+  mutate(wd=as.factor(weekdays(date)))
+dd%>%group_by(cluster,wd)%>%summarise(n=n())%>%spread("cluster", "n")
 
 
+#dd%<>%mutate(cluster=ifelse(wd=="Saturday",1,ifelse(wd=="Sunday",2,ifelse(wd=="Friday",3,4))))
 
-stat <- read_delim(paste0(getwd(),"/RigasKarte/2018-summary.csv"),"\t", col_types = "ciii")
-needs(tidyr)
-needs(ggplot2)
-stat%>%gather(key="mode", value="passengers", -month)
-ggplot(data=stat%>%gather(key="mode", value="passengers", -month), aes(x=month, y=passengers, group=mode, fill=mode)) +
-  scale_x_discrete(expand = c(0, 0)) +
-  scale_y_continuous(expand = c(0, 0)) +
-  geom_area(alpha=0.6)+scale_fill_manual(values=c("blue", "red", "green"))
+dd%>%filter(cluster==3, wd!="Saturday", wd!="Sunday")
+dd%>%filter(cluster==1, wd=="Saturday")
+dd%>%filter(cluster==3)
+
+interval<-74
+ma<-data.frame()
+for (i in seq(from=1,to=nrow(dd)-interval, by=7)){
+  mo<-dd[i:(i+interval),]
+  dt<-dd[i+interval/2,]$date
+  l<-list(date=dt)
+  for (cl in 1:ncl){
+    dts<-mo%>%filter(cluster==cl)%>%select(dt)%>%pull
+    l[[paste0("cluster",cl)]]<-sum(dist[dts,dts])/(length(dts)*(length(dts)-1))
+  }
+  ma<-bind_rows(ma,l)
+}
+str<-c(cluster1="Weekdays, pattern 1",cluster2="Weekdays, pattern 2",cluster3="Weekends")
+as_tibble(ma)%>%gather(key="cluster", value="distance", -date)%>%mutate(cluster=str[cluster])%>%
+  ggplot(aes(y=distance,x=date, group=cluster, color=cluster))+geom_line(size=2)+ylab("Within-cluster distance")
+
+dd%>%mutate(m=month(date))%>%group_by(cluster,m)%>%summarise(n())%>%print(n=50)
+
+dd%>%mutate(m=month(date))%>%group_by(cluster,m,wd)%>%summarise(n=n())%>%spread("m","n")%>%
+  filter(cluster!=3)%>%arrange(wd)
+
+dd%>%mutate(m=as.factor(month(date)))%>%group_by(cluster,m)%>%summarise(n=n())%>%spread("m","n")%>%
+  filter(cluster!=3)%>%arrange(cluster)
+dd%>%mutate(sea=(month(date)%%12)%/%3)%>%group_by(cluster,sea)%>%summarise(n=n())%>%spread("sea","n")%>%
+  filter(cluster!=3)%>%arrange(cluster)
+
+dd%>%filter(cluster!=3)%>%ggplot(aes(x=date, y=cluster,group=1))+geom_line()
+
+
+
+df<-res[["20180130"]]$mobility.pattern%>%mutate(label=ifelse(size>1500,ifelse(is.na(datetime),"back",format(datetime,"%H:%M")),NA))%>%
+  mutate(weight=3+round(10*(size-min(size))/(max(size)-min(size))))
+m <- leaflet() %>%addTiles()
+for(i in 1:nrow(df)){
+  m%<>%addPolylines(label=as.character(df[i, "label"]),labelOptions = labelOptions(noHide = T),
+                    lat = as.numeric(df[i, c("stop_lat.x", "stop_lat.y")]), 
+                    lng = as.numeric(df[i, c("stop_lon.x", "stop_lon.y")]),
+                    weight = as.numeric(df[i,"weight"]))%>%
+    addCircleMarkers(lat = as.numeric(df[i, c("stop_lat.y")]), 
+                        lng = as.numeric(df[i, c("stop_lon.y")]),radius=4,color="#F30")
+}
+m
+
+
+df<-mobility%>%filter(card_number=="53372409")%>%mutate(label=ifelse(is.na(datetime),"back",format(datetime,"%H:%M")))
+m <- leaflet() %>%addTiles()
+for(i in 1:nrow(df)){
+  m%<>%addPolylines(label=as.character(df[i, "label"]),labelOptions = labelOptions(noHide = T),
+                    lat = as.numeric(df[i, c("stop_lat.x", "stop_lat.y")]), 
+                    lng = as.numeric(df[i, c("stop_lon.x", "stop_lon.y")]))%>%
+    addCircleMarkers(lat = as.numeric(df[i, c("stop_lat.y")]), 
+                     lng = as.numeric(df[i, c("stop_lon.y")]),radius=4,color="#F30")
+}
+m
+
+
+
+
+
+# routes <- data[['routes_df']] %>%
+# #  slice(which(grepl('a|b', route_id, ignore.case=TRUE))) %>%
+#   '$'('route_id')
+# 
+# 
+# cols<-routes
+# cols<-cols%>%replace(startsWith(.,prefix="riga_bus"),"blue")%>%replace(startsWith(.,prefix="riga_tram"),"red")%>%replace(startsWith(.,prefix="riga_trol"),"green")
+# 
+# m<-data %>% map_gtfs(route_ids = routes, route_colors = cols, include_stops = F, route_opacity = 0.5)
+# m$height <- '1000'
+# options(viewer = NULL)
+# 
+# Sys.setlocale(category = "LC_ALL", locale = "") 
+# 
+# m%>% leaflet::clearControls() %>% leaflet::addCircleMarkers(
+#   label = stops$stop_name,
+#   radius = 2,
+#   stroke = TRUE,
+#   opacity = 0.5,
+#   weight = 1,
+#   color = 'grey',
+#   fill = TRUE,
+#   fillColor = "pink",
+#   fillOpacity = 0.9,
+#   lat = stops$stop_lat,
+#   lng = stops$stop_lon)
+# 
+# 
+# 
+# ids <- data$trips_df %>%
+#   select(trip_id,route_id, service_id, shape_id) %>%
+#   distinct() %>%
+#   filter(route_id %in% routes)
+# 
+# ids %<>% filter(route_id=="riga_tram_11")
+# 
+# route_ids <- ids$route_id[1]
+# service_ids <- ids$service_id[1]
+# shape_ids <- ids$shape_id[1]
+# 
+# stop_ids<-data[['stop_times_df']]%>%filter(trip_id==ids$trip_id[1])%>%pull(stop_id)
+# stops<-data[['stops_df']]%>%filter(stop_id %in% stop_ids)
+# # lets map the specific data with some other options enabled.
+# m<-data %>%
+#   map_gtfs(route_ids = route_ids,
+#            service_ids = service_ids,
+#            shape_ids = shape_ids,
+#            route_colors = 'blue', # set the route color
+#            stop_details = TRUE, # get more stop details on click
+#            route_opacity = .5, include_stops = F)
+# 
+# m$height <- '1000'
+# 
+# m%>% leaflet::clearControls() %>% leaflet::addCircleMarkers(
+#   label = stops$stop_name,
+#   radius = 2,
+#   stroke = TRUE,
+#   opacity = 0.5,
+#   weight = 1,
+#   color = 'grey',
+#   fill = TRUE,
+#   fillColor = "pink",
+#   fillOpacity = 0.9,
+#   lat = stops$stop_lat,
+#   lng = stops$stop_lon)
+# 
+# 
+# 
+# stat <- read_delim(paste0(getwd(),"/RigasKarte/2018-summary.csv"),"\t", col_types = "ciii")
+# needs(tidyr)
+# needs(ggplot2)
+# stat%>%gather(key="mode", value="passengers", -month)
+# ggplot(data=stat%>%gather(key="mode", value="passengers", -month), aes(x=month, y=passengers, group=mode, fill=mode)) +
+#   scale_x_discrete(expand = c(0, 0)) +
+#   scale_y_continuous(expand = c(0, 0)) +
+#   geom_area(alpha=0.6)+scale_fill_manual(values=c("blue", "red", "green"))

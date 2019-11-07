@@ -34,7 +34,10 @@ needs(doParallel)
 needs(glasso)
 needs(scales)
 needs(stringr)
-
+needs(BigVAR)
+needs(matrixStats)
+needs(randomForest)
+needs(Boruta)
 source(file.path("R","prepare_data_functions.R"))
 source(file.path("R","cv_functions.R"))
 source(file.path("R","cv_utils.R"))
@@ -44,8 +47,8 @@ source(file.path("R","models_spvar.R"))
 
 
 # Define files for intermediate results
-models.estimated.file <- "ITISE2019.models.estimated.rds"
-results.file <- "ITISE2019.results.rds"
+models.estimated.file <- "ITISE2019.models.estimated.10.rds"
+results.file <- "ITISE2019.results.10.rds"
 fs.file <- "ITISE2019.fs.rds"
 summary.file <- "ITISE2019.summary.rds"
 ```
@@ -175,11 +178,11 @@ RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
       print(paste("Estimating model",modelid))
       res<-do.call(rollingWindow,
                c(params,list(xModel=suf(xModel.star,"rf"),matrixMode="rf",verbose=T,
-                             control=list(nfeatures=cv$nfeatures),
+                             control=list(nfeatures=cv$nfeatures, fs="IncMSE"),
                              arLags=cv$arLags,include.mean=cv$include.mean,save_links_file=save.links.file)),
                envir=environment())
       results<-bind_rows(results,res%>%mutate(trainingMinutes=cv$trainingMinutes,arLags=cv$arLags,
-                         include.mean=cv$include.mean,nfeatures=cv$nfeatures))
+                         include.mean=cv$include.mean,nfeatures=cv$nfeatures, fs="IncMSE"))
       models.estimated<-c(models.estimated,modelid)
       saveRDS(results, results.file)
       saveRDS(models.estimated, models.estimated.file)
@@ -187,6 +190,44 @@ RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
       print(paste("Model",modelid,"already estimated; skipped"))
     }
     
+    #RF system-wide
+    
+    modelid <- paste(suf(xModel.star,"rf-system-wide")$name,cv$trainingMinutes,
+                     cv$arLags,cv$nfeatures,cv$include.mean,collapse = '')
+    if (!(modelid %in% models.estimated)){
+      print(paste("Estimating model",modelid))
+      res<-do.call(rollingWindow,
+               c(params,list(xModel=suf(xModel.star,"rf"),matrixMode="rf",verbose=T,
+                             control=list(nfeatures=cv$nfeatures, fs="system-wide"),
+                             arLags=cv$arLags,include.mean=cv$include.mean,save_links_file=save.links.file)),
+               envir=environment())
+      results<-bind_rows(results,res%>%mutate(trainingMinutes=cv$trainingMinutes,arLags=cv$arLags,
+                         include.mean=cv$include.mean,nfeatures=cv$nfeatures, fs="system-wide"))
+      models.estimated<-c(models.estimated,modelid)
+      saveRDS(results, results.file)
+      saveRDS(models.estimated, models.estimated.file)
+    }else{
+      print(paste("Model",modelid,"already estimated; skipped"))
+    }
+    
+    # RF boruta
+    # modelid <- paste(suf(xModel.star,"rf-boruta")$name,cv$trainingMinutes,
+    #                  cv$arLags,cv$include.mean,collapse = '')
+    # if (!(modelid %in% models.estimated)){
+    #   print(paste("Estimating model",modelid))
+    #   res<-do.call(rollingWindow,
+    #            c(params,list(xModel=suf(xModel.star,"rf-boruta"),matrixMode="rf",verbose=T,
+    #                          control=list(nfeatures=cv$nfeatures,fs="boruta"),
+    #                          arLags=cv$arLags,include.mean=cv$include.mean,save_links_file=save.links.file)),
+    #            envir=environment())
+    #   results<-bind_rows(results,res%>%mutate(trainingMinutes=cv$trainingMinutes,arLags=cv$arLags,
+    #                      include.mean=cv$include.mean,fs="boruta"))
+    #   models.estimated<-c(models.estimated,modelid)
+    #   saveRDS(results, results.file)
+    #   saveRDS(models.estimated, models.estimated.file)
+    # }else{
+    #   print(paste("Model",modelid,"already estimated; skipped"))
+    # }
     # Complete
     mult<-1
     modelid <- paste(suf(xModel.star,"complete")$name,cv$trainingMinutes*mult,
@@ -250,6 +291,12 @@ k <- length(series)
 mysample$data<-mysample$data[,c("datetime",series)]
 print(paste("Number of series", length(series)))
 
+
+
+source(file.path("R","models_spvar.R"))
+rfFixed(mysample$data[1:960,], series, fs="system-wide")
+starForecast(mysample$data[1:960,series], forecastingSteps=3,arLags=3,matrixMode="rf", control=list(nfeatures=20,fs="system-wide"))
+
 # Prepare a matrix of maximal lags (for travel time regularisation)
 lagMatrix <- round(mysample$shortest.distances / ta)
 lagMatrix[is.infinite(lagMatrix)]<-0
@@ -266,7 +313,7 @@ forecastingSteps<-12
 save.links.file <- NULL
 # Define a grid for tuning parameters
 ccfThresholds <- c(0.1)
-nfeatures <- c(20)
+nfeatures <- c(2,5,10)
 means <- c(F)
 ar_orders <- c(3)
 stationary <- c(F)
@@ -289,7 +336,7 @@ RunModels(mysample$data, series, ta, forecastingSteps, forecastEvery,
                       models.estimated.file, results.file,save.links.file)
 
 
-params <- c('trainingMinutes','arLags','nfeatures','include.mean','struct')
+params <- c('trainingMinutes','arLags','nfeatures','include.mean','struct','fs')
 
 
 # Read estimation results
@@ -300,27 +347,27 @@ models.estimated <- readRDS(models.estimated.file)
 # results<- results%>%filter(!startsWith(model,"BigVAR"))
 # saveRDS(results, results.file)
 
-s<-cvSummary(results, mae, cumulative=T, params=params)%>%
-    mutate(modelid=paste(model,trainingMinutes, arLags,nfeatures,include.mean,struct))%>%
+s<-cvSummary(results, mase, cumulative=T, params=params)%>%
+    mutate(modelid=paste(model,trainingMinutes, arLags,nfeatures,include.mean,struct,fs))%>%
     mutate(modelid=gsub(" NA","",modelid))
+
+s%<>%ungroup%>%mutate(model=paste0(model,ifelse((!is.na(fs) & fs=="system-wide"),fs,"")))
 
 s%>%
     filter(forecast_horizon==1, arLags==3)%>%
-    group_by(model)%>%filter(MAE==min(MAE))%>%arrange(MAE)%>%ungroup
+    group_by(model)%>%filter(MASE==min(MASE))%>%arrange(MASE)%>%ungroup
 
 
-prep<-s%>%ungroup%>%filter(arLags==3, trainingMinutes==960)%>%mutate(model=ifelse(model=="BigVAR lasso","Penalized VAR",ifelse(model=="STAR complete","Complete VAR",ifelse(model=="STAR rf","RF-controlled sparse VAR",ifelse(model=="STAR refined","Refined VAR",model)))))%>%group_by(model, forecast_horizon)%>%filter(MAE==min(MAE))%>%filter(!(model %in% c("STAR ccf", "STAR travelTime")))
+prep<-s%>%ungroup%>%filter(arLags==3, trainingMinutes==960)%>%group_by(model,forecast_horizon)%>%filter(MAE==min(MAE))%>%ungroup%>%mutate(model=ifelse(model=="BigVAR lasso","Penalized VAR",ifelse(model=="STAR complete","Complete VAR",ifelse(model=="STAR rf","RF-based sparse VAR (equation-wise)", ifelse(model=="STAR refined","Refined VAR",ifelse(model=="STAR rfsystem-wide","RF-based sparse VAR (system-wise)",model))))))%>%group_by(modelid, forecast_horizon)%>%filter(MAE==min(MAE))%>%filter(!(model %in% c("STAR ccf", "STAR travelTime")))
 
 plot1<-prep%>%select(model, forecast_horizon, MAE)%>%
-  ggplot(aes(x = forecast_horizon, y = MAE, col=model, group=model)) + geom_line(size=1)+ 
+  ggplot(aes(x = forecast_horizon, y = MAE, col=model, group=model,linetype=model)) + geom_line(size=1)+ 
   scale_x_continuous(breaks=seq(1,12),expand=c(0,0))+labs(x="Forecasting horizon, min", y="Average MAE")+
   theme(legend.position = "none")
 
 plot2<-prep%>%select(model, forecast_horizon, q95)%>%
-  ggplot(aes(x = forecast_horizon, y = q95, col=model, group=model)) + geom_line(size=1)+ 
+  ggplot(aes(x = forecast_horizon, y = q95, col=model, group=model,linetype=model)) + geom_line(size=1)+ 
   scale_x_continuous(breaks=seq(1,12),expand=c(0,0))+labs(x="Forecasting horizon, min", y="95th percentile of MAE")
-
-
 
 get_legend<-function(myggplot){
   tmp <- ggplot_gtable(ggplot_build(myggplot))
@@ -328,6 +375,8 @@ get_legend<-function(myggplot){
   legend <- tmp$grobs[[leg]]
   return(legend)
 }
+
+
 legend <- get_legend(plot2)
 plot2 <- plot2 + theme(legend.position = "none")
 
