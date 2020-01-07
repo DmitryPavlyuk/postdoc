@@ -32,8 +32,9 @@ needs(asymmetry)
 series <- colnames(mysample$data)[-1]
 
 k <- length(series)
-mysample$data<-mysample$data[1:(24*60*1),c("datetime",series)]
-#mysample$data<-mysample$data[,c("datetime",series)]
+#mysample$data<-mysample$data[1:(24*60*1),c("datetime",series)]
+mysample$data<-mysample$data[,c("datetime",series)]
+
 print(paste("Number of series", length(series)))
 
 # Prepare a matrix of maximal lags (for travel time regularisation)
@@ -82,15 +83,18 @@ miny<-min(nodes$node_lon)
 maxy<-max(nodes$node_lon)
 print(paste(minx, maxx, miny, maxy))
 
-resolution.x<-80
-resolution.y<-64
+#resolution.x<-80
+#resolution.y<-64
+resolution.x<-160
+resolution.y<-128
+
 
 minintensity <- min(mysample$data[,series])
 maxintensity <- max(mysample$data[,series])
-minintensity <- -100
-maxintensity <- 100
+minintensity <- -127
+maxintensity <- 127
 num <- 1
-for (i in seq(1,nrow(mysample$data),by=1)){
+for (i in seq(1,nrow(mysample$data[,series]),by=1)){
 vals <- mysample$data[i,series]
 colnames(vals)<-node.names
 
@@ -109,14 +113,16 @@ pixels<-nodes%>%left_join(vals, by=c("node_name"="node"))%>%select(x, y, value)
 #save.image(im, "test.png")
 
 for (j in (1:nrow(pixels))){
-  m[as.integer(pixels[j,"x"]),as.integer(pixels[j,"y"])] <- (as.integer(pixels[j,"value"])-minintensity)/(maxintensity-minintensity)
+  m[as.integer(pixels[j,"x"]),as.integer(pixels[j,"y"])] <-1- (as.integer(pixels[j,"value"])-minintensity)/(maxintensity-minintensity)
 }
+
+m[is.na(m)]<-0
 #dev.new(width=resolution.x, height=resolution.y)
-#im.width<-resolution.x
-#im.height<-resolution.y
-im.width<- resolution.x*3
-im.height<- resolution.y*3
-print(sum(!is.na(m)))
+im.width<-resolution.x
+im.height<-resolution.y
+#im.width<- resolution.x*3
+#im.height<- resolution.y*3
+#print(sum(!is.na(m)))
 png(file.path(imfolder,paste0(sprintf("%010d", num),".png")), width = im.width, height=im.height)
 par(mar=c(0,0,1,0))
 
@@ -124,10 +130,11 @@ cool = rainbow(10, start=rgb2hsv(col2rgb('cyan'))[1], end=rgb2hsv(col2rgb('blue'
 warm = rainbow(10, start=rgb2hsv(col2rgb('red'))[1], end=rgb2hsv(col2rgb('yellow'))[1])
 cols = c(rev(cool),"#CCCCCC", rev(warm))
 
-mypalette <- colorRampPalette(cols)(255)
+#mypalette <- colorRampPalette(cols)(255)
+mypalette <- grey.colors(255)
 
 image(m, useRaster=FALSE, axes=FALSE, col=mypalette, zlim=c(0,1))
-title(format(mysample$data[i,"datetime"]%>%pull, "%H:%M"), font.main=4)
+#title(format(mysample$data[i,"datetime"]%>%pull, "%H:%M"), font.main=4)
 dev.off()
 
 

@@ -5,7 +5,16 @@ rollingWindow <- function(data, seriesNames,xModel, trainingWindowSize,
   rownames(df)<-data$datetime
   df <- as.data.frame(df[,c(seriesNames)])
   n <- nrow(df)
-  validationSize <- n - trainingWindowSize - forecastingSteps + 1
+  if (length(forecastingSteps)>1){
+    nfs <- max(forecastingSteps)
+    lfs <- length(forecastingSteps)
+    fs<-forecastingSteps
+  }else{
+    nfs <- forecastingSteps
+    lfs <- forecastingSteps
+    fs<-1:forecastingSteps
+  } 
+  validationSize <- n - trainingWindowSize - nfs + 1
   forecasts <- list()
   if (clusterNumber>1){
     cl <- makeCluster(clusterNumber, outfile=outfile)
@@ -21,16 +30,21 @@ rollingWindow <- function(data, seriesNames,xModel, trainingWindowSize,
   count <- 1
   result <- tibble()
   for (i in seqVals){
+    if (length(forecastingSteps)>1){
+      act<-(i+trainingWindowSize-1+forecastingSteps)
+    }else{
+      act<-(i+trainingWindowSize):(i+trainingWindowSize-1+forecastingSteps)
+    } 
     hash <- randomStr()
-    actual <- as.tibble(data[(i+trainingWindowSize):(i+trainingWindowSize-1+forecastingSteps),])
-    actual$forecast_horizon<-1:forecastingSteps
+    actual <- as.tibble(data[act,])
+    actual$forecast_horizon<-fs
     ldate <- data[i+trainingWindowSize-1,]$datetime
     actual$last_date <- ldate
     actual$v<-"actual"
     actual$model_hash<-hash
     f<-as.tibble(res[[count]])
-    f$datetime <- data[(i+trainingWindowSize):(i+trainingWindowSize-1+forecastingSteps),]$datetime
-    f$forecast_horizon<-1:forecastingSteps
+    f$datetime <- data[act,]$datetime
+    f$forecast_horizon<-fs
     f$v<-"forecasted"
     f$last_date <- ldate
     f$model_hash<-hash

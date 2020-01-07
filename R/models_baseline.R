@@ -76,3 +76,86 @@ xModel.autoarima <- list(
   functions = c(),
   packages = c('forecast')
 )
+
+
+estimate.HA<-function(params, cv, results.file, models.estimated.file){
+  modelid <- paste(xModel.zero$name,collapse = '')
+  models.estimated <- readRDS(models.estimated.file)
+  if (!(modelid %in% models.estimated)){
+    results <- readRDS(results.file)
+    print(paste("Estimating model",modelid))
+    res<-do.call(rollingWindow,
+                 c(params,list(xModel=xModel.zero)),
+                 envir=environment())
+    results<-bind_rows(results,res)
+    models.estimated<-c(models.estimated,modelid)
+    saveRDS(results, results.file)
+    saveRDS(models.estimated, models.estimated.file)
+  }else{
+    print(paste("Model",modelid,"already estimated; skipped"))
+  }
+}
+
+
+estimate.arima<-function(params, cv, results.file, models.estimated.file){
+  
+  #Auto arima
+  modelid <- paste(xModel.autoarima$name,cv$trainingMinutes,
+                   cv$include.mean,cv$stationary,cv$allowdrift,collapse = '')
+  models.estimated <- readRDS(models.estimated.file)
+  if (!(modelid %in% models.estimated)){
+    results <- readRDS(results.file)
+    print(paste("Estimating model",modelid))
+    res<-do.call(rollingWindow,
+                 c(params,list(xModel=xModel.autoarima,
+                               allowmean=cv$include.mean,
+                               stationary=cv$stationary,
+                               allowdrift=cv$allowdrift)),
+                 envir=environment())
+    results<-bind_rows(results,res%>%mutate(trainingMinutes=cv$trainingMinutes,include.mean=cv$include.mean,
+                                            stationary=cv$stationary,
+                                            allowdrift=cv$allowdrift))
+    models.estimated<-c(models.estimated,modelid)
+    saveRDS(results, results.file)
+    saveRDS(models.estimated, models.estimated.file)
+  }else{
+    print(paste("Model",modelid,"already estimated; skipped"))
+  }
+}
+
+
+estimate.MA<-function(params, cv, results.file, models.estimated.file){
+  modelid <- paste(xModel.ma$name,collapse = '')
+  models.estimated <- readRDS(models.estimated.file)
+  if (!(modelid %in% models.estimated)){
+    results <- readRDS(results.file)
+    print(paste("Estimating model",modelid))
+    res<-do.call(rollingWindow,
+                 c(params,list(xModel=xModel.ma)),
+                 envir=environment())
+    results<-bind_rows(results,res)
+    models.estimated<-c(models.estimated,modelid)
+    saveRDS(results, results.file)
+    saveRDS(models.estimated, models.estimated.file)
+  }else{
+    print(paste("Model",modelid,"already estimated; skipped"))
+  }
+}
+
+estimate.simpleMean<-function(params, cv, results.file, models.estimated.file){
+  modelid <- paste(xModel.mean$name,cv$trainingMinutes,collapse = '')
+  models.estimated <- readRDS(models.estimated.file)
+  if (!(modelid %in% models.estimated)){
+    results <- readRDS(results.file)
+    print(paste("Estimating model",modelid))
+    res<-do.call(rollingWindow,
+                 c(params,list(xModel=xModel.mean)),
+                 envir=environment())
+    results<-bind_rows(results,res%>%mutate(trainingMinutes=cv$trainingMinutes))
+    models.estimated<-c(models.estimated,modelid)
+    saveRDS(results, results.file)
+    saveRDS(models.estimated, models.estimated.file)
+  }else{
+    print(paste("Model",modelid,"already estimated; skipped"))
+  }
+}
