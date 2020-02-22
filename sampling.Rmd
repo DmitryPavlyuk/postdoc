@@ -30,9 +30,11 @@ source(file.path("R","prepare_data_functions.R"))
 
 ```{r sampling}
 
-sample.rds <- file.path(data.folder.prepared,"EWGT2019.rds")
+sample.rds <- file.path(data.folder.prepared,"ALL5.rds")
 # Set up temporal aggregation
-ta <- 1 #minutes
+ta <- 5 #minutes
+#maxdistance<-6
+maxdistance<-6
 
 if (!file.exists(sample.rds)){
   print("Preparing sample")
@@ -49,13 +51,16 @@ if (!file.exists(sample.rds)){
   
   
   # Research area is all nodes within 6 minutes of travel from an arbitrary selected central node (S567)
-  central.node<-config.nodes%>% filter(node_station_id=="S567")%>%select(node_name)%>%first%>%unlist
-  max.distance.time<-6
-  res<- GetNetwork(central.node,shortest.distances,max.distance.time)
+#  central.node<-config.nodes%>% filter(node_station_id=="S567")%>%select(node_name)%>%first%>%unlist
+#  max.distance.time<-maxdistance
+#  res<- GetNetwork(central.node,shortest.distances,max.distance.time)
   
   # Use traffic volume as the only characteristic of interest
-  series<-paste0(names(res),".volume")
-  
+#  series<-paste0(names(res),".volume")
+ 
+  #set.seed(123)
+ #series<-paste0(sample(config.nodes%>%select(node_name)%>%pull, 200, replace=F),".volume")
+   series<-paste0(config.nodes%>%select(node_name)%>%pull,".volume")
   
   # Read traffic data for selected nodes week by week
   dat <- tibble()
@@ -137,7 +142,7 @@ if (!file.exists(sample.rds)){
   
   saveRDS(mysample,sample.rds)
 }else{
-  print("Sample exists - using saved")
+  print(paste("Sample exists - using saved",sample.rds))
   mysample <- readRDS(sample.rds)
 }
 

@@ -1,0 +1,286 @@
+---
+title: "MT-ITS2019"
+author: "Dmitry Pavlyuk"
+date: "December 17, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+This markdown document reproduces the research "Spatiotemporal Traffic Forecasting as a Video Prediction Problem", submitted to MT-ITS2019:6th International Conference on Models and Technologies for Intelligent Transportation Systems
+and its further extension to the journal article, submitted to the Special Issue of Algorithms https://www.mdpi.com/journal/algorithms/special_issues/MT_ITS
+
+
+```{r child='sampling.Rmd'}
+```
+
+
+Load necessary libraries
+----------------
+```{r libs}
+memory.limit(size=1024*128)
+library(needs)
+needs(knitr)
+needs(tidyverse)
+needs(reshape2)
+needs(ggplot2)
+needs(geosphere)
+needs(igraph)
+needs(Metrics)
+needs(imputeTS)
+needs(e1071)
+needs(MTS)
+needs(forecast)
+needs(doParallel)
+needs(glasso)
+needs(scales)
+needs(stringr)
+needs(e1071 )
+needs(randomForest )
+needs(Boruta)
+
+source(file.path("R","prepare_data_functions.R"))
+source(file.path("R","cv_functions.R"))
+source(file.path("R","cv_utils.R"))
+source(file.path("R","models_util.R"))
+source(file.path("R","models_baseline.R"))
+source(file.path("R","models_spvar.R"))
+source(file.path("R","models_spatial.R"))
+
+
+# Define files for intermediate results
+models.estimated.file <- "MTITS2019/MTITS2019.models.estimated.rds"
+results.file <- "MTITS2019/MTITS2019.results.rds"
+sample.rds <- file.path("MTITS2019","ALL5.rds")
+ta<-5
+```
+
+
+```{r models}
+RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
+                      validationSize, validationEnd, 
+                      lagMatrix,shortestA, cvgrid, 
+                      models.estimated.file, results.file,save.links.file){
+  start.time <- Sys.time()
+  results<-tibble()
+  models.estimated <- c()
+  if (file.exists(models.estimated.file)) models.estimated <- readRDS(models.estimated.file)
+  else saveRDS(models.estimated, models.estimated.file)
+  if (file.exists(results.file)) results <- readRDS(results.file)
+  else saveRDS(results, results.file)
+  for (r in 1:nrow(cvgrid)){
+    cv <- cvgrid[r,]
+    print(paste("Tuned parameter's set",r,"of",nrow(cvgrid)))
+    print(cv)
+    validationStart <- validationEnd - validationSize
+    trainingSize <- cv$trainingMinutes/ta
+    dat.restricted<-data[(validationStart-trainingSize+1):validationEnd,]
+    base_params<-list(data=dat.restricted, seriesNames=series,
+                      forecastingSteps=forecastingSteps, forecastEvery=forecastEvery)
+    params<-c(base_params,list(trainingWindowSize=trainingSize))
+    
+    if (length(forecastingSteps)>1) params$forecastingSteps=max(forecastingSteps)
+    estimate.simpleMean(params,cv,results.file, models.estimated.file)
+    estimate.MA(params,cv,results.file, models.estimated.file)
+    estimate.HA(params,cv,results.file, models.estimated.file)
+    estimate.arima(params,cv,results.file, models.estimated.file)
+    estimate.VAR(params,cv,results.file, models.estimated.file)
+    estimate.SpVARtt(params,cv,results.file, models.estimated.file)
+    estimate.SpVARcc(params,cv,results.file, models.estimated.file)
+    
+    if (length(forecastingSteps)>1) params$forecastingSteps=forecastingSteps
+    estimate.SpatilARIMAX(params,cv,results.file, models.estimated.file)
+    estimate.SpatilSVR(params,cv,results.file, models.estimated.file)
+    print(Sys.time() - start.time)
+  }
+}
+```
+
+
+```{r plot_map}
+mysample <- readRDS(sample.rds)
+series <- colnames(mysample$data)[-1]
+
+central.node<-"rnd_90797"
+center<-mysample$config.nodes%>%filter(node_name==central.node)%>%select(node_lon,node_lat)%>%as.list
+
+set.seed(0)
+nodes<-mysample$config.nodes%>%filter(node_name %in% gsub('.volume','',series))%>%rowwise()%>%filter(distHaversine(c(node_lon,node_lat),c(center$node_lon,center$node_lat))<25000)
+write.csv(nodes,"MTITS2019/MTITS.nodes.csv", row.names = F)
+nodes<-nodes%>%sample_n(100)
+series<-nodes%>%select(node_name)%>%pull
+
+write.csv(nodes,"MTITS2019/MTITS.nodes.sample.csv", row.names = F)
+```
+
+```{r sampling}
+series<-paste0(series,".volume")
+#series <- colnames(mysample$data)[-1]
+
+#set.seed(0)
+#series<- sample(series, 10, replace = F)
+mysample$data<-mysample$data[,c("datetime",series)]
+
+# print(paste("Number of series", length(series)))
+# v<-mysample$shortest.distances
+# v<-v[v!=0]
+# v<-v[v!=Inf]
+# mean(v)
+
+# Prepare a matrix of maximal lags (for travel time regularisation)
+lagMatrix <- round(mysample$shortest.distances / ta)
+lagMatrix[is.infinite(lagMatrix)]<-0
+rownames(lagMatrix)<-paste0(rownames(lagMatrix),".volume")
+colnames(lagMatrix)<-paste0(colnames(lagMatrix),".volume")
+lagMatrix<-lagMatrix[as.vector(series),as.vector(series)]
+
+
+shortestA <- mysample$shortest.distances
+shortestA<-shortestA[as.vector(gsub(".volume","",series)),as.vector(gsub(".volume","",series))]
+
+d<-c()
+for (i in seq(1, 60)){
+  d<-append(d,length(shortestA[shortestA<i])/ncol(shortestA))
+}
+dat<-tibble(x=seq(1, 60), d=d)
+ggplot(dat, aes(x, d)) + geom_line(colour="red")+xlab("Travel time")+ylab("% of reached nodes")
+
+d<-tibble(av=as.vector(shortestA[shortestA<Inf]))
+ggplot(d, aes(av)) + geom_density(alpha = 0.1,fill="red", colour="red")
+
+gr<-shortestA
+gr[gr>9]<-0
+mean(gr[gr>0])
+needs(igraph)
+g<-graph_from_adjacency_matrix(gr, mode = "directed", weighted = T)
+#tkplot(g, vertex.size=7, vertex.color="lightblue", vertex.label=NA,edge.arrow.size=0.5, edge.width=E(g)$weight*0.1)
+
+comp<-components(g, mode = "weak")
+
+
+rotate <- function(x) t(apply(x, 2, rev))
+
+nodes<-mysample$config.nodes%>%filter(node_name %in% gsub('.volume','',series))
+cs<-nodes%>%arrange(node_lon)%>%select(node_name)%>%pull
+rs<-nodes%>%arrange(node_lat)%>%select(node_name)%>%pull
+
+
+gr<-1/shortestA[cs,rs]
+g<-graph_from_adjacency_matrix(gr, mode = "directed", weighted = T)
+L<-as.matrix(laplacian_matrix(g, normalized = T))
+L<-L-diag(nrow(L))*L
+L<-rotate(rotate(rotate(L)))
+L[L<(-0.05)]<- (-0.05)
+image(L, xlab="Latitute",ylab="Longitude", axes=F, col=heat.colors(255))
+
+```
+
+```{r experiments}
+validationSize <- nrow(mysample$data)-5*24*60/ta
+validationEnd <- nrow(mysample$data)
+forecastEvery<-12*6*9
+forecastingSteps<-3
+save.links.file <- NULL
+
+# Define a grid for tuning parameters
+
+cvgrid <- expand.grid(trainingMinutes = c(5*24*60),
+                      ccfThreshold=c(0.1),
+                      include.mean = c(F),
+                      arLags = c(6),
+                      stationary =  c(F),
+                      allowdrift =  c(F),
+                      radius1=c(10),
+                      radius2=c(30),
+                      include_ratio=c(F),
+                      spatial_step=c(5),
+                      modelsp=c('svm', 'lm'),
+                      decay=c(NA,10))
+
+# Run all models
+RunModels(mysample$data, series, ta, forecastingSteps, forecastEvery,
+                      validationSize, validationEnd, 
+                      lagMatrix, shortestA, cvgrid, 
+                      models.estimated.file, results.file,save.links.file)
+ 
+```
+
+```{r analyse_results}
+
+# Choose models with optimal sets of tuned parameters for arLargs=3
+params <- c('trainingMinutes','allowdrift','stationary','arLags','ccfThreshold','include.mean','radius1','radius2','include_ratio', 'spatial_step','modelsp', 'decay')
+
+results <- readRDS(results.file)%>%mutate(modelsp=as.character(modelsp))
+models.estimated <- readRDS(models.estimated.file)
+summary(results$actual)
+results<-results%>%filter(abs(actual)<200, abs(actual)>10)
+s<-cvSummary(results, mae, cumulative=F, params=params)%>%
+    mutate(modelid=paste(model,trainingMinutes, arLags, ccfThreshold,
+                         include.mean,stationary,allowdrift,radius1,radius2,include_ratio, spatial_step,modelsp,decay))%>%
+    mutate(modelid=gsub(" NA","",modelid))
+#saveRDS(s, summary.file)
+
+options(pillar.sigfig = 4)
+s%>%
+    filter(forecast_horizon==3)%>%
+    group_by(model)%>%filter(MAE==min(MAE))%>%ungroup%>%select(-c('allowdrift','stationary','include.mean'))
+
+s%>%filter(model=="SpatialARIMAX",forecast_horizon==3)%>%ungroup%>%select(MAE,q95, modelid)%>%print(n=50)
+s%>%filter(model=="SpatialSVR",forecast_horizon==3)%>%ungroup%>%select(RMSE,q95, modelid)%>%print(n=50)
+
+#autoArimaXForecast(mysample$data[1:7200,series],forecastingSteps=1, shortestA=shortestA,stationary=T, allowdrift =F, allowmean = F,
+#                              radius1=5, radius2=10, verbose=F,include_ratio=F,spatial_step=0)
+
+winners3 <- s%>%
+    filter(forecast_horizon==3)%>%
+    group_by(model)%>%filter(MAE==min(MAE))%>%ungroup
+
+
+ results.cum <-results%>%
+    mutate(modelid=gsub(" NA","",paste(model,trainingMinutes, arLags, ccfThreshold,
+                         include.mean,stationary,allowdrift,radius1,radius2,include_ratio, spatial_step,modelsp,decay)))%>%
+    group_by(model_hash,detector)%>%
+    arrange(model_hash,detector,forecast_horizon)%>%
+    mutate(cumactual=cumsum(actual),cumforecasted=cumsum(forecasted))
+
+#tmodels<-c("autoarima 7200 FALSE FALSE FALSE","SpatialARIMAX 7200 FALSE FALSE FALSE 10 30 FALSE 5",           "SpatialSVR 7200 10 30 FALSE 5 svm","STAR ccf 7200 6 0.1 FALSE")
+ tmodels<-c("autoarima 7200 FALSE FALSE FALSE","SpatialARIMAX 7200 FALSE FALSE FALSE 10 30 FALSE 5",           "SpatialSVR 7200 10 30 FALSE 5 svm")
+results.cum.filtered<-results.cum%>%filter(forecast_horizon==3,modelid %in% tmodels)%>% mutate(modelid=ifelse(str_detect(modelid,"^STAR ccf"),"SpVAR-cc",modelid))%>% mutate(modelid=ifelse(str_detect(modelid,"^SpatialARIMAX"),"SpX-ARIMAX",modelid))%>% mutate(modelid=ifelse(str_detect(modelid,"^SpatialSVR"),"SpX-SVR",modelid))%>% mutate(modelid=ifelse(str_detect(modelid,"^autoarima"),"ARIMA",modelid))
+ 
+gtmp1<-results.cum.filtered%>%mutate(last_date_d = format(datetime, format="%H:%M",tz="GMT"))
+
+gtmp2<-gtmp1%>%group_by(modelid,last_date_d)%>%summarise(mn=mae(cumactual,cumforecasted))
+gtmp2%>%ggplot(aes(x = mn, group=modelid, fill=modelid)) +
+  geom_density(kernel = "epanechnikov", alpha = 0.4)+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))+labs(x="Temporarily averaged MAE", fill="Model")
+ 
+gtmp2<-gtmp1%>%group_by(modelid,detector)%>%summarise(mn=mae(cumactual,cumforecasted))
+gtmp2%>%ggplot(aes(x = mn, group=modelid, fill=modelid)) +
+  geom_density(kernel = "epanechnikov", alpha = 0.4)+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))+labs(x="Spatially averaged MAE", fill="Model")
+ 
+```
+
+```{r prepare_gcnn}
+
+
+write.table(mysample$data%>%select(-datetime)%>%as.data.frame, "data100.csv", row.names=F,col.names=F, sep=",")
+gr <- shortestA
+gr[gr>30]<-0
+
+gr[gr==0]<-Inf
+W<-exp(-(gr^2)/(10^2))
+W[W==Inf]<-0
+
+W<-1/gr
+W[W==Inf]<-0
+
+length(W[W>0])/length(W)
+#W[W<quantile(W, 0.75)]<-0
+write.table(W, "data100-Wneg.csv", row.names=F,col.names=F, sep=",")
+write.table(W, "data100-Wnegexp.csv", row.names=F,col.names=F, sep=",")
+#python main.py --n_route 100 --graph data100-Wneg.csv --n_pred=3 --epoch=2
+
+```

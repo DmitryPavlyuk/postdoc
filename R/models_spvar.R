@@ -328,3 +328,73 @@ xModel.bigVAR <- list(
   functions = c('predictBigVAR'),
   packages = c('tidyverse','BigVAR')
 )
+
+
+estimate.SpVARtt<-function(params, cv, results.file, models.estimated.file){
+modelid <- paste(suf(xModel.star,"travelTime")$name,cv$trainingMinutes,
+                 cv$arLags,cv$include.mean,collapse = '')
+models.estimated <- readRDS(models.estimated.file)
+if (!(modelid %in% models.estimated)){
+  results <- readRDS(results.file)
+  print(paste("Estimating model",modelid))
+  res<-do.call(rollingWindow,
+               c(params,list(xModel=suf(xModel.star,"travelTime"),matrixMode="travelTime",
+                             control=list(lagMatrix=lagMatrix),
+                             arLags=cv$arLags,include.mean=cv$include.mean,save_links_file=save.links.file)),
+               envir=environment())
+  results<-bind_rows(results,res%>%mutate(trainingMinutes=cv$trainingMinutes,arLags=cv$arLags,
+                                          include.mean=cv$include.mean))
+  models.estimated<-c(models.estimated,modelid)
+  saveRDS(results, results.file)
+  saveRDS(models.estimated, models.estimated.file)
+}else{
+  print(paste("Model",modelid,"already estimated; skipped"))
+}
+}
+
+
+estimate.SpVARcc<-function(params, cv, results.file, models.estimated.file){
+modelid <- paste(suf(xModel.star,"ccf")$name,cv$trainingMinutes,
+                 cv$arLags,cv$ccfThreshold,cv$include.mean,collapse = '')
+models.estimated <- readRDS(models.estimated.file)
+if (!(modelid %in% models.estimated)){
+  results <- readRDS(results.file)
+  print(paste("Estimating model",modelid))
+  res<-do.call(rollingWindow,
+               c(params,list(xModel=suf(xModel.star,"ccf"),matrixMode="CCF",
+                             control=list(ccfThreshold=cv$ccfThreshold),
+                             arLags=cv$arLags,include.mean=cv$include.mean,save_links_file=save.links.file)),
+               envir=environment())
+  results<-bind_rows(results,res%>%mutate(trainingMinutes=cv$trainingMinutes,arLags=cv$arLags,
+                                          include.mean=cv$include.mean,ccfThreshold=cv$ccfThreshold))
+  models.estimated<-c(models.estimated,modelid)
+  saveRDS(results, results.file)
+  saveRDS(models.estimated, models.estimated.file)
+}else{
+  print(paste("Model",modelid,"already estimated; skipped"))
+}
+}
+
+
+
+estimate.VAR<-function(params, cv, results.file, models.estimated.file){
+  modelid <- paste(suf(xModel.star,"complete")$name,cv$trainingMinutes,
+                 cv$arLags, cv$include.mean,collapse = '')
+  models.estimated <- readRDS(models.estimated.file)
+  if (!(modelid %in% models.estimated)){
+    results <- readRDS(results.file)
+  print(paste("Estimating model",modelid))
+  res<-do.call(rollingWindow,
+               c(params,list(xModel=suf(xModel.star,"complete"),matrixMode="complete",
+                             control=list(),
+                             arLags=cv$arLags,include.mean=cv$include.mean)),
+               envir=environment())
+  results<-bind_rows(results,res%>%mutate(trainingMinutes=cv$trainingMinutes,arLags=cv$arLags,
+                                          include.mean=cv$include.mean))
+  models.estimated<-c(models.estimated,modelid)
+  saveRDS(results, results.file)
+  saveRDS(models.estimated, models.estimated.file)
+}else{
+  print(paste("Model",modelid,"already estimated; skipped"))
+}
+}
