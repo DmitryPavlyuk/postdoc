@@ -1,4 +1,4 @@
-prepareFixed <-function(lagM, ARlags, MAlags,series, include.mean=T){
+prepareFixed <-function(lagM, ARlags, MAlags,series, include.mean=T, exclude.series=NA){
   k <- nrow(lagM)
   ARs <- list()
   MAs <- list()
@@ -26,15 +26,22 @@ prepareFixed <-function(lagM, ARlags, MAlags,series, include.mean=T){
     }
   }
   rnames <- c()
+  es<-c()
   res <- matrix(0,0,k)
   for (i in 1:ARlags){
     res <- rbind(res,ARs[[i]])
     rnames<-c(rnames,paste0(series,"_arl",i))
+    if (!is.na(exclude.series)){
+      es<-c(es,paste0(exclude.series,"_arl",i))
+    }
   }	
   if(MAlags>0){
     for (i in 1:MAlags){
       res <- rbind(res,MAs[[i]])
       rnames<-c(rnames,paste0(series,"_mal",i))
+      if (!is.na(exclude.series)){
+        es<-c(es,paste0(exclude.series,"_arl",i))
+      }
     }
   }
   cnames <- series
@@ -44,12 +51,15 @@ prepareFixed <-function(lagM, ARlags, MAlags,series, include.mean=T){
   }
   rownames(res) <- rnames
   colnames(res) <- cnames
+  if (!is.na(exclude.series)){
+    res[es,]<-0
+  }
+  #image(res)
   return(res)
 }
 
 starForecast <-function(sampl, forecastingSteps, arLags, matrixMode=NULL, control=list(ccfThreshold=0.5), returnModel=F, refine = F, include.mean=F, verbose=T,
-                        save_links_file = NULL){
-  
+                        save_links_file = NULL, exclude.series=NULL){
   last_date <- rownames(sampl)[nrow(sampl)]
   if (verbose) print(paste("SpVAR! [",paste(matrixMode, collapse = ','),"] training sample: ",rownames(sampl)[1],"-",rownames(sampl)[nrow(sampl)]))
   series <- colnames(sampl)
@@ -63,13 +73,13 @@ starForecast <-function(sampl, forecastingSteps, arLags, matrixMode=NULL, contro
       fixed <- matrix(rep(0,nr*nc),nr,nc)
       
       if ("travelTime" %in% matrixMode) fixed <- prepareFixed(control$lagMatrix, arLags, 0, 
-                                 series,include.mean=include.mean)+fixed
+                                 series,include.mean=include.mean,exclude.series=exclude.series)+fixed
       if ("glasso" %in% matrixMode) fixed <- glassoFixed(sampl,names(sampl),maxLag=arLags,rho=control$glassoRho,
                                   include.mean=include.mean)+fixed
       if ("rf" %in% matrixMode) fixed <- rfFixed(sampl,names(sampl),maxLag=arLags,n=control$nfeatures,fs=control$fs,
                                                          include.mean=include.mean)+fixed
       if ("CCF" %in% matrixMode) fixed <- prepareFixed(constructCorMatrix(sampl,names(sampl),maxLag=arLags,threshold=control$ccfThreshold), arLags, 0,
-                                series, include.mean=include.mean)+fixed
+                                series, include.mean=include.mean,exclude.series=exclude.series)+fixed
       # Majority voting
       fixed[fixed<(length(matrixMode)/2)]<-0
       fixed[fixed>=(length(matrixMode)/2)]<-1
@@ -77,14 +87,14 @@ starForecast <-function(sampl, forecastingSteps, arLags, matrixMode=NULL, contro
       print(paste("Number of links in ensemble",sum(fixed>0)))
     }else if (matrixMode == "CCF"){
       lagMatrix <- constructCorMatrix(sampl,names(sampl),maxLag=arLags,threshold=control$ccfThreshold)
-      fixed <- prepareFixed(lagMatrix, arLags, 0, series, include.mean=include.mean)
+      fixed <- prepareFixed(lagMatrix, arLags, 0, series, include.mean=include.mean,exclude.series=exclude.series)
     }else if (matrixMode == "glasso"){
       fixed <- glassoFixed(sampl,names(sampl),maxLag=arLags,rho=control$glassoRho, include.mean=include.mean)
     }else if (matrixMode == "univariate"){
       fixed <- univariateFixed(sampl,names(sampl),maxLag=arLags, include.mean=include.mean)
     }else if (matrixMode == "travelTime"){
       fixed <- prepareFixed(control$lagMatrix, arLags, 0,
-                            series,include.mean=include.mean)
+                            series,include.mean=include.mean,exclude.series=exclude.series)
     }else if (matrixMode == "rf"){
       fixed <- rfFixed(sampl,names(sampl),maxLag=arLags,n=control$nfeatures, fs=control$fs, include.mean=include.mean)
     }else if (matrixMode == "univariate"){
@@ -116,7 +126,7 @@ starForecast <-function(sampl, forecastingSteps, arLags, matrixMode=NULL, contro
     }
   }else{
     if(!complete){
-      fixed <- prepareFixed(lagMatrix, arLags, 0,series, include.mean=include.mean)
+      fixed <- prepareFixed(lagMatrix, arLags, 0,series, include.mean=include.mean,exclude.series=exclude.series)
     }
   }
   if(arLags==0){
@@ -333,17 +343,21 @@ xModel.bigVAR <- list(
 estimate.SpVARtt<-function(params, cv, results.file, models.estimated.file){
 modelid <- paste(suf(xModel.star,"travelTime")$name,cv$trainingMinutes,
                  cv$arLags,cv$include.mean,collapse = '')
+if (!is.null(cv$exclude.s)) modelid<-paste(modelid,cv$exclude.s,collapse = '')
 models.estimated <- readRDS(models.estimated.file)
+es <- NA
+if (!is.null(cv$exclude.s)) es<-strsplit(as.character(cv$exclude.s),":")[[1]]
 if (!(modelid %in% models.estimated)){
   results <- readRDS(results.file)
   print(paste("Estimating model",modelid))
   res<-do.call(rollingWindow,
                c(params,list(xModel=suf(xModel.star,"travelTime"),matrixMode="travelTime",
                              control=list(lagMatrix=lagMatrix),
+                             exclude.series=es,
                              arLags=cv$arLags,include.mean=cv$include.mean,save_links_file=save.links.file)),
                envir=environment())
   results<-bind_rows(results,res%>%mutate(trainingMinutes=cv$trainingMinutes,arLags=cv$arLags,
-                                          include.mean=cv$include.mean))
+                                          include.mean=cv$include.mean, exclude.series=cv$exclude.s))
   models.estimated<-c(models.estimated,modelid)
   saveRDS(results, results.file)
   saveRDS(models.estimated, models.estimated.file)

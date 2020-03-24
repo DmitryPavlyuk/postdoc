@@ -30,7 +30,7 @@ source(file.path("R","prepare_data_functions.R"))
 
 ```{r sampling}
 
-sample.rds <- file.path(data.folder.prepared,"ALL5.rds")
+sample.rds <- file.path(data.folder.prepared,"ALL5-original.rds")
 # Set up temporal aggregation
 ta <- 5 #minutes
 #maxdistance<-6
@@ -115,11 +115,16 @@ if (!file.exists(sample.rds)){
   print(paste("Upper outliers", dat.training%>%filter(value>s_ub, s_ub>0)%>%nrow))
   print(paste("Lower outliers", dat.training%>%filter(value<s_lb)%>%nrow))
   
-  dat.training <- dat.training%>%
+  dt<-dat.training
+  dat.training <- dt%>%
     mutate(prepared=(ifelse(value<s_lb,s_lb,ifelse(value>s_ub, s_ub,value))-s_m))%>%
     select(datetime,node,prepared)
   
-  #dat.training%>%filter(node=="rnd_95345.volume", datetime>"2017-07-31 06:55:00")%>%ggplot(aes(x = datetime, y = prepared, col=node, group=node)) + geom_line()+scale_x_datetime(labels = date_format("%H:%m"), date_breaks ="12 hours")
+  dat.training.orig <- dt%>%
+    mutate(prepared=(ifelse(value<s_lb,s_lb,ifelse(value>s_ub, s_ub,value))))%>%
+    select(datetime,node,prepared)
+  
+  #dat.training.orig%>%filter(node=="rnd_95345.volume", datetime>"2017-07-31 06:55:00")%>%ggplot(aes(x = datetime, y = prepared, col=node, group=node)) + geom_line()+scale_x_datetime(labels = date_format("%H:%m"), date_breaks ="12 hours")
   # Exclude nodes without variance in traffic
   series <- dat.training%>%group_by(node)%>%summarise(sd=sd(prepared))%>%
     filter(sd>0.1)%>%select(node)%>%pull
@@ -130,12 +135,14 @@ if (!file.exists(sample.rds)){
     filter(m<240)%>%select(node)%>%pull
   
   dat.training <-dat.training%>%filter(node %in% series)
+  dat.training.orig <-dat.training.orig%>%filter(node %in% series)
   res<-gsub(paste0(".volume"),"",series)
   
   #ggplot(dat.training, aes(x = prepared, col=node, group=node)) + geom_histogram()+facet_wrap( ~ node)
   #ggplot(dat.training, aes(x = datetime, y = prepared, col=node, group=node)) + geom_line()+facet_wrap( ~ node)
   
   mysample <-list(data=dat.training%>%spread(key = node, value = prepared),
+                  data.orig=dat.training.orig%>%spread(key = node, value = prepared),
                   shortest.distances=shortest.distances[res,res],
                   links=load_all_links(config.nodes),
                   config.nodes = config.nodes%>%filter(node_name %in% res))

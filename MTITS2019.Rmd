@@ -105,9 +105,9 @@ central.node<-"rnd_90797"
 center<-mysample$config.nodes%>%filter(node_name==central.node)%>%select(node_lon,node_lat)%>%as.list
 
 set.seed(0)
-nodes<-mysample$config.nodes%>%filter(node_name %in% gsub('.volume','',series))%>%rowwise()%>%filter(distHaversine(c(node_lon,node_lat),c(center$node_lon,center$node_lat))<25000)
+nodes<-mysample$config.nodes%>%filter(node_name %in% gsub('.volume','',series))%>%rowwise()%>%filter(distHaversine(c(node_lon,node_lat),c(center$node_lon,center$node_lat))<10000)
 write.csv(nodes,"MTITS2019/MTITS.nodes.csv", row.names = F)
-nodes<-nodes%>%sample_n(100)
+nodes<-nodes%>%sample_n(30)
 series<-nodes%>%select(node_name)%>%pull
 
 write.csv(nodes,"MTITS2019/MTITS.nodes.sample.csv", row.names = F)
@@ -120,6 +120,7 @@ series<-paste0(series,".volume")
 #set.seed(0)
 #series<- sample(series, 10, replace = F)
 mysample$data<-mysample$data[,c("datetime",series)]
+mysample$data.orig<-mysample$data.orig[,c("datetime",series)]
 
 # print(paste("Number of series", length(series)))
 # v<-mysample$shortest.distances
@@ -137,6 +138,8 @@ lagMatrix<-lagMatrix[as.vector(series),as.vector(series)]
 
 shortestA <- mysample$shortest.distances
 shortestA<-shortestA[as.vector(gsub(".volume","",series)),as.vector(gsub(".volume","",series))]
+#traffic<-list(shortest = shortestA, data = mysample$data[1:(1*24*60/ta),])
+#save(traffic, file="traffic.rda")
 
 d<-c()
 for (i in seq(1, 60)){
@@ -149,14 +152,13 @@ d<-tibble(av=as.vector(shortestA[shortestA<Inf]))
 ggplot(d, aes(av)) + geom_density(alpha = 0.1,fill="red", colour="red")
 
 gr<-shortestA
-gr[gr>9]<-0
+gr[gr>15]<-0
 mean(gr[gr>0])
 needs(igraph)
 g<-graph_from_adjacency_matrix(gr, mode = "directed", weighted = T)
-#tkplot(g, vertex.size=7, vertex.color="lightblue", vertex.label=NA,edge.arrow.size=0.5, edge.width=E(g)$weight*0.1)
+tkplot(g, vertex.size=7, vertex.color="lightblue", vertex.label=NA,edge.arrow.size=0.5, edge.width=E(g)$weight*0.1)
 
 comp<-components(g, mode = "weak")
-
 
 rotate <- function(x) t(apply(x, 2, rev))
 
@@ -171,7 +173,13 @@ L<-as.matrix(laplacian_matrix(g, normalized = T))
 L<-L-diag(nrow(L))*L
 L<-rotate(rotate(rotate(L)))
 L[L<(-0.05)]<- (-0.05)
-image(L, xlab="Latitute",ylab="Longitude", axes=F, col=heat.colors(255))
+rsum<-rowSums(L!=0)
+names(rsum[rsum==0])
+csum<-colSums(L!=0)
+
+sn <- c(names(rsum[rsum<10]),names(csum[csum<10]))
+
+image(L[!(rownames(L) %in% sn),!(colnames(L) %in% sn)], xlab="Latitute",ylab="Longitude", axes=F, col=heat.colors(255))
 
 ```
 
