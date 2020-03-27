@@ -56,6 +56,44 @@ rollingWindow <- function(data, seriesNames,xModel, trainingWindowSize,
   return(result%>%mutate(model=xModel$name))
 }
 
+estimateFeatures <- function(fs.function, data, seriesNames,trainingWindowSize,
+                          forecastEvery, max.lag,fs.folder,
+                          req.functions=c(),req.packages=c(),
+                          clusterNumber=detectCores()-1,
+                          outfile="estimate-features.log",...){
+  df<-as.data.frame(data)
+  rownames(df)<-data$datetime
+  df <- as.data.frame(df[,c(seriesNames)])
+  n <- nrow(df)
+  validationSize <- n - trainingWindowSize + 1
+  if (clusterNumber>1){
+    cl <- makeCluster(clusterNumber, outfile=outfile)
+    registerDoParallel(cl)
+  }
+  opts <- list(...)
+  seqVals <- seq(1,validationSize, by=forecastEvery)
+  print(paste("Timestamps:", length(seqVals),"Number of clusters:",clusterNumber))
+  folder <- file.path(fs.folder,trainingWindowSize, max.lag)
+  if (!is.null(opts$rho)) folder <- file.path(folder,opts$rho)
+  if (!file.exists(folder)) dir.create(folder, recursive = T)
+  res <- foreach (i = seqVals,.export=req.functions,
+                  .packages=req.packages) %dopar% {
+                    mts <- as.matrix(df[i:(i+trainingWindowSize-1),])
+                    filename<-paste0(rownames(mts)[nrow(mts)],".rds")
+                    filename <-gsub(" ","_", filename)
+                    filename <-gsub(":","", filename)
+                    filename <- file.path(folder,filename)
+                    if (file.exists(filename)){
+                      print(paste("FS file exists: ", filename, ". Feature selection skipped"))
+                    }else{
+                      fs <- fs.function(mts, max.lag=max.lag, ...)
+                      print(paste("Saving", filename))
+                      saveRDS(fs,file=filename)
+                    }
+                  }
+  
+  return("OK")
+}
 
 cvSummary <- function(results,fun, cumulative=F, params=c()){
   n <- toupper(substitute(fun))

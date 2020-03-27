@@ -104,8 +104,9 @@ central.node<-"rnd_90797"
 center<-mysample$config.nodes%>%filter(node_name==central.node)%>%select(node_lon,node_lat)%>%as.list
 
 set.seed(0)
-nodes<-mysample$config.nodes%>%filter(node_name %in% gsub('.volume','',series))%>%rowwise()%>%filter(distHaversine(c(node_lon,node_lat),c(center$node_lon,center$node_lat))<25000)
+nodes<-mysample$config.nodes%>%filter(node_name %in% gsub('.volume','',series))%>%rowwise()%>%filter(distHaversine(c(node_lon,node_lat),c(center$node_lon,center$node_lat))<20000)
 write.csv(nodes,file.path(dir,"nodes-all.csv"), row.names = F)
+set.seed(0)
 nodes<-nodes%>%sample_n(100)
 series<-nodes%>%select(node_name)%>%pull
 write.csv(nodes,file.path(dir,"nodes-sample.csv"),  row.names = F)
@@ -147,7 +148,7 @@ d<-tibble(av=as.vector(shortestA[shortestA<Inf]))
 ggplot(d, aes(av)) + geom_density(alpha = 0.1,fill="red", colour="red")
 
 gr<-shortestA
-gr[gr>9]<-0
+gr[gr>15]<-0
 mean(gr[gr>0])
 needs(igraph)
 g<-graph_from_adjacency_matrix(gr, mode = "directed", weighted = T)
@@ -170,6 +171,34 @@ L<-L-diag(nrow(L))*L
 L<-rotate(rotate(rotate(L)))
 L[L<(-0.05)]<- (-0.05)
 image(L, xlab="Latitute",ylab="Longitude", axes=F, col=heat.colors(255))
+
+```
+
+
+```{r fs}
+install.packages("fsMTS", repos="http://R-Forge.R-project.org")
+needs(fsMTS)
+needs(plot.matrix)
+source(file.path("R","cv_functions.R"))
+estimateFeatures(fs.function=fsMTS::fsMTS, 
+                 data = mysample$data, 
+                 seriesNames = series,
+                 trainingWindowSize = 12*24*0.5,
+                 forecastEvery = 1, 
+                 max.lag = 3,
+                 fs.folder = file.path(dir,"fs","MI"),
+                 req.packages = c("fsMTS"),
+                 method="MI",
+                 shortest = shortestA,
+                 step = ta,
+                 rho=0.1
+                 )
+
+res1<-readRDS(file.path(dir,"fs","GLASSO",288,3,0.1, "2017-08-06_000000.rds"))
+res1<-readRDS(file.path(dir,"fs","GLASSO",288,3,0.5, "2017-08-07_000000.rds"))
+plot(res1)
+plot(fsMTS::cutoff(res1, 0.01))
+fsMTS::fsSimilarity(res1, res2,cutoff=T, threshold = 0.01, method="Kuncheva")
 
 ```
 
