@@ -74,7 +74,7 @@ estimateFeatures <- function(fs.function, data, seriesNames,trainingWindowSize,
   seqVals <- seq(1,validationSize, by=forecastEvery)
   print(paste("Timestamps:", length(seqVals),"Number of clusters:",clusterNumber))
   folder <- file.path(fs.folder,trainingWindowSize, max.lag)
-  if (!is.null(opts$rho)) folder <- file.path(folder,opts$rho)
+  if (!is.null(opts$rho) & (opts$method=="GLASSO")) folder <- file.path(folder,opts$rho)
   if (!file.exists(folder)) dir.create(folder, recursive = T)
   res <- foreach (i = seqVals,.export=req.functions,
                   .packages=req.packages) %dopar% {
@@ -91,7 +91,6 @@ estimateFeatures <- function(fs.function, data, seriesNames,trainingWindowSize,
                       saveRDS(fs,file=filename)
                     }
                   }
-  
   return("OK")
 }
 

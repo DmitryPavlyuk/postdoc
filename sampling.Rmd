@@ -126,11 +126,11 @@ if (!file.exists(sample.rds)){
   
   #dat.training.orig%>%filter(node=="rnd_95345.volume", datetime>"2017-07-31 06:55:00")%>%ggplot(aes(x = datetime, y = prepared, col=node, group=node)) + geom_line()+scale_x_datetime(labels = date_format("%H:%m"), date_breaks ="12 hours")
   # Exclude nodes without variance in traffic
-  series <- dat.training%>%group_by(node)%>%summarise(sd=sd(prepared))%>%
+  series <- dat.training.orig%>%group_by(node)%>%summarise(sd=sd(prepared))%>%
     filter(sd>0.1)%>%select(node)%>%pull
   
   # Exclude nodes with more than 4 hours without traffic
-  series <- dat.training%>%filter(node %in% series)%>%group_by(node)%>%
+  series <- dat.training.orig%>%filter(node %in% series)%>%group_by(node)%>%
     arrange(datetime)%>%summarise(m=MaxRle(prepared,0))%>%
     filter(m<240)%>%select(node)%>%pull
   
