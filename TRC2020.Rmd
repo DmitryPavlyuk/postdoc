@@ -177,6 +177,7 @@ image(L, xlab="Latitute",ylab="Longitude", axes=F, col=heat.colors(255))
 
 ```{r fs}
 install.packages("fsMTS", repos="http://R-Forge.R-project.org")
+require(needs)
 needs(fsMTS)
 needs(plot.matrix)
 source(file.path("R","cv_functions.R"))
@@ -184,14 +185,14 @@ estimateFeatures(fs.function=fsMTS::fsMTS,
                  data = mysample$data, 
                  seriesNames = series,
                  trainingWindowSize = 12*24*0.5,
-                 forecastEvery = 1, 
+                 forecastEvery = 12*24, 
                  max.lag = 3,
-                 fs.folder = file.path(dir,"fs","MI"),
+                 clusterNumber=1,
+                 fs.folder = file.path(dir,"fs","PSC"),
                  req.packages = c("fsMTS"),
-                 method="MI",
+                 method="PSC",
                  shortest = shortestA,
-                 step = ta,
-                 rho=0.1
+                 step = ta
                  )
 
 res1<-readRDS(file.path(dir,"fs","GLASSO",288,3,0.1, "2017-08-06_000000.rds"))
@@ -200,6 +201,105 @@ plot(res1)
 plot(fsMTS::cutoff(res1, 0.01))
 fsMTS::fsSimilarity(res1, res2,cutoff=T, threshold = 0.01, method="Kuncheva")
 
+```
+
+```{r fs_stability}
+needs(ggplot2)
+needs(tibbletime)
+needs(tidyverse)
+needs(svMisc)
+needs(rlist)
+needs(plot.matrix)
+
+folder<-file.path("C:/tmp/","MI",144)
+fmt <- "%Y-%m-%d_%H%M%S"
+date.from <- as.POSIXct("2017-07-31_000000",format=fmt)
+date.to <- as.POSIXct("2017-08-01_000000",format=fmt)
+
+
+dates <- seq(from=date.from, to=date.to, by="5 min")
+
+mlist<-list()
+for(row in 1:length(dates)){
+  name<-format(dates[row],fmt)
+  filename <- paste0(name,".rds")
+  if (file.exists(file.path(folder, filename))){
+    fs <- readRDS(file.path(folder, filename))
+    mlist[[name]]<-fs
+  }
+}
+msim<-fsSimilarityMatrix(mlist,threshold=0.01,method="Kuncheva")
+image(msim)
+
+needs(cluster)
+d<-1/msim
+hc<-fastcluster::hclust(as.dist(d))
+plot(res)
+(memb <- cutree(hc, k = 5))
+
+HC <- hclust(as.dist(d), method="single")
+plot(2:10, sapply(2:10, function(i) { 
+   mean(silhouette(cutree(HC, i), dmatrix=d)[,"sil_width"]) }),
+   xlab="Number of clusters", ylab="Average Silhouette", type="b", pch=20)
+
+
+simils <- tibble(datetime = dates,CCF=NA, CCFvsMean=NA, CCFaveg = NA, CCFsmoothed = NA)
+mean.fs <- NULL
+for(row in 1:nrow(simils)){
+  filename <- paste0(format(simils[row,]$datetime,fmt),".rds")
+  if (file.exists(file.path(folder, filename))){
+    fs <- readRDS(file.path(folder, filename))
+    if (is.null(mean.fs)){
+      mean.fs<-fs  
+    }else{
+      mean.fs <- mean.fs+fs
+    }
+  }
+}
+
+fs.prev<-NULL
+fs.prev.smoothed<-NULL
+fs.smooth <- list()
+SMOOTH_SIZE <- 12
+thres<-0.01
+m.fs <- fsMTS::cutoff(mean.fs,thres)
+alpha = 0.4
+for(row in 1:nrow(simils)){
+  filename <- paste0(format(simils[row,]$datetime,fmt),".rds")
+  if (file.exists(file.path(folder, filename))){
+    fs <- readRDS(file.path(folder, filename))
+    if (!is.null(fs.prev)){
+      simils[row,]$CCF<-fsMTS::fsSimilarity(fs.prev, fs,cutoff=T, threshold = thres, method="Kuncheva")
+    }
+    simils[row,]$CCFvsMean<-fsMTS::fsSimilarity(m.fs, fs,cutoff=T, threshold = thres, method="Kuncheva")
+    
+    fs.cut<-fsMTS::cutoff(fs,threshold = thres)
+    fs.smooth<-list.prepend(fs.smooth, row=fs.cut)
+    if (length(fs.smooth)>SMOOTH_SIZE) fs.smooth<-list.remove(fs.smooth, length(fs.smooth))
+    
+    smoothed <- matSmoothing(fs.smooth,alpha)
+    if (!is.null(fs.prev.smoothed)){
+      simils[row,]$CCFsmoothed<-fsMTS::fsSimilarity(fs.prev.smoothed, smoothed,cutoff=T, 
+                                                    threshold = thres, method="Kuncheva")
+    }
+    
+    simils[row,]$CCFaveg <- mean(fs, na.rm = T)
+    
+    fs.prev.smoothed<-smoothed
+    fs.prev <- fs
+  }
+  svMisc::progress(100*row/nrow(simils))
+}
+
+mean_roll <- rollify(mean, window = 24)
+
+simils<-simils%>%mutate(CCF.ma=mean_roll(CCF))
+
+simils%>%select(datetime,CCF,CCFsmoothed)%>%gather(key="key", value="value",-one_of("datetime"))%>%
+  ggplot(aes(x = datetime, y=value, group=key, col=key))+geom_line()
+
+summary(simils)
+simils
 ```
 
 ```{r experiments}

@@ -118,3 +118,18 @@ cvSummary <- function(results,fun, cumulative=F, params=c()){
 randomStr <- function(length=12){
   paste(sample(c(0:9, letters, LETTERS), length, replace=TRUE),collapse="")
 }
+
+matSmoothing <- function(mlist, alpha){
+  res <- NULL
+  mult <- alpha
+    for (i in (1:length(mlist))){
+      A <- mult*mlist[[i]]
+      if (is.null(res)){
+        res<-A
+      }else{
+        res <- res + A
+      }
+      mult <- mult*(1-alpha)
+  }
+  return(res)
+}
