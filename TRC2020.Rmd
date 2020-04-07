@@ -43,7 +43,6 @@ source(file.path("R","cv_utils.R"))
 source(file.path("R","models_util.R"))
 source(file.path("R","models_baseline.R"))
 source(file.path("R","models_spvar.R"))
-source(file.path("R","models_spatial.R"))
 
 
 # Define files for intermediate results
@@ -51,7 +50,7 @@ dir<-"TRC2020"
 models.estimated.file <- file.path(dir,"models.rds")
 results.file <- file.path(dir,"results.rds")
 complete.rds <- file.path("data","prepared","ALL5-original.rds")
-sample.rds <- file.path(dir,"data.rds")
+sample.rds <- file.path(dir,"data64.rds")
 ta<-5
 ```
 
@@ -94,22 +93,30 @@ selectMostImportant <- function(data, series, rho, topn, shortest, distance.lim=
 
 
 morning.nodes <- selectMostImportant(morning.rush, series = c(series), 
-                    rho=0.3, topn = 30, shortest=mysample$shortest.distances)
+                    rho=0.3, topn = 50, shortest=mysample$shortest.distances,distance.lim=1)
 length(morning.nodes)
-write.csv(mysample$config.nodes%>%filter(node_name %in% morning.nodes),file.path(dir,"nodes-MR.csv"),  row.names = F)
+write.csv(mysample$config.nodes%>%filter(node_name %in% morning.nodes),file.path(dir,"nodes-MR50.csv"),  row.names = F)
 
 evening.nodes <- selectMostImportant(evening.rush, series = c(series), 
-                    rho=0.3, topn = 30, shortest=mysample$shortest.distances)
+                    rho=0.3, topn = 50, shortest=mysample$shortest.distances,distance.lim=1)
 length(evening.nodes)
-write.csv(mysample$config.nodes%>%filter(node_name %in% evening.nodes),file.path(dir,"nodes-ER.csv"),  row.names = F)
+write.csv(mysample$config.nodes%>%filter(node_name %in% evening.nodes),file.path(dir,"nodes-ER50.csv"),  row.names = F)
 
 write.csv(mysample$config.nodes%>%filter(node_name %in% gsub('.volume','',intersect(morning.nodes,evening.nodes))),file.path(dir,"nodes-ER+MR.csv"),  row.names = F)
-
+intersect(morning.nodes,evening.nodes)
+length(union(morning.nodes,evening.nodes))
 series <- union(morning.nodes,evening.nodes)
 
-dat<-mysample$data.orig%>%gather(key = "node", value="value", -datetime)%>%filter(node %in% paste0(series,".volume"))%>%mutate(node=gsub(".volume","",node), dt=format(datetime, "%H:%M"))%>%group_by(node,dt)%>%summarize(value=median(value))
-dat%>%filter(node %in% morning.nodes)%>%ggplot(aes(x = dt, y = value, col=node, group=node)) + geom_line()
-dat%>%filter(node %in% evening.nodes)%>%ggplot(aes(x = dt, y = value, col=node, group=node)) + geom_line()
+dat<-mysample$data.orig%>%gather(key = "node", value="value", -datetime)%>%filter(node %in% paste0(series,".volume"))%>%mutate(node=gsub(".volume","",node), dt=as.POSIXct(format(datetime, "%H:%M"),format="%H:%M",tz="GMT"))%>%group_by(node,dt)%>%summarize(value=median(value))
+date.labels = seq(from = min(dat$dt),
+                 to = max(dat$dt),
+                 by = "hour")
+dat%>%filter(node %in% morning.nodes)%>%ggplot(aes(x = dt, y = value, col=node, group=node)) + geom_line()+ 
+  theme(legend.position = "none")+scale_x_datetime(labels = date_format("%H:%M"),
+                     date_breaks = "4 hours")+ xlab("TIme of the day") + ylab("Traffic volume")
+dat%>%filter(node %in% evening.nodes)%>%ggplot(aes(x = dt, y = value, col=node, group=node))  + geom_line()+ 
+  theme(legend.position = "none")+scale_x_datetime(labels = date_format("%H:%M"),
+                     date_breaks = "4 hours")+ xlab("TIme of the day") + ylab("Traffic volume")
 
 sampl<-list(data = mysample$data[,c("datetime",series)],
                shortest.distances=mysample$shortest.distances[series,series])
@@ -153,29 +160,21 @@ install.packages("fsMTS", repos="http://R-Forge.R-project.org")
 needs(fsMTS)
 needs(plot.matrix)
 source(file.path("R","cv_functions.R"))
+data.scaled<-cbind(sampl$data[,1],scale(sampl$data[,-1]))
 estimateFeatures(fs.function=fsMTS::fsMTS, 
                  data = sampl$data, 
                  seriesNames = series,
-                 trainingWindowSize = 12*24*0.5,
+                 trainingWindowSize = 36,#12*24*0.5,
                  forecastEvery = 1,
                  max.lag = 3,
                  fs.folder = file.path(dir,"fs",length(series),"CCF"),
                  req.packages = c("fsMTS"),
                  method="CCF",
+                 rho=0.1,
                  shortest = shortestA,
                  step = ta,
                  localized = F
                  )
-
-m=as.matrix(mysample$data[1:144,series])
-fsMTS::fsMTS(mts=as.matrix(mysample$data[1:144,series]), max.lag=3,method="LARS")
-
-res1<-readRDS(file.path(dir,"fs","GLASSO",288,3,0.1, "2017-08-06_000000.rds"))
-res1<-readRDS(file.path(dir,"fs","GLASSO",288,3,0.5, "2017-08-07_000000.rds"))
-plot(res1)
-plot(fsMTS::cutoff(res1, 0.01))
-fsMTS::fsSimilarity(res1, res2,cutoff=T, threshold = 0.01, method="Kuncheva")
-
 ```
 
 
@@ -204,46 +203,51 @@ RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
     params<-c(base_params,list(trainingWindowSize=trainingSize))
     
     if (length(forecastingSteps)>1) params$forecastingSteps=max(forecastingSteps)
-    estimate.simpleMean(params,cv,results.file, models.estimated.file)
-    estimate.MA(params,cv,results.file, models.estimated.file)
     estimate.HA(params,cv,results.file, models.estimated.file)
     estimate.arima(params,cv,results.file, models.estimated.file)
-    estimate.VAR(params,cv,results.file, models.estimated.file)
-    estimate.SpVARtt(params,cv,results.file, models.estimated.file)
-    estimate.SpVARcc(params,cv,results.file, models.estimated.file)
-    
-    if (length(forecastingSteps)>1) params$forecastingSteps=forecastingSteps
-    estimate.SpatilARIMAX(params,cv,results.file, models.estimated.file)
-    estimate.SpatilSVR(params,cv,results.file, models.estimated.file)
+    estimate.SpVAR(params,cv,results.file, models.estimated.file)
+    #estimate.SpVARcc(params,cv,results.file, models.estimated.file)
     print(Sys.time() - start.time)
   }
 }
 ```
 
 ```{r experiments}
-validationSize <- nrow(mysample$data)-5*24*60/ta
-validationEnd <- nrow(mysample$data)
-forecastEvery<-12*6*9
-forecastingSteps<-3
-save.links.file <- NULL
+dat<-as.data.frame(sampl$data)
+rownames(dat)<-format(dat$datetime,"%Y-%m-%d_%H%M%S")
+
+fs.dir<-file.path(dir,"fs",length(series))
+xModel.star$run(dat[1:576,series], forecastingSteps=3, arLags=3, 
+                fs.folder=file.path(fs.dir,"CCF",144,3), 
+                control=list(),
+                returnModel=F, 
+                refine = F, 
+                include.mean=F, 
+                verbose=T,
+                exclude.series=NULL,
+                threshold=0.01)
+
+validationSize <- nrow(sampl$data)-12*60*10/ta
+validationEnd <- nrow(sampl$data)
+forecastEvery<-3*24
+forecastingSteps<-12
 
 # Define a grid for tuning parameters
-
-cvgrid <- expand.grid(trainingMinutes = c(5*24*60),
-                      ccfThreshold=c(0.1),
+cvgrid <- expand.grid(trainingMinutes = c(12*60*10),
                       include.mean = c(F),
-                      arLags = c(6),
+                      arLags = c(3),
                       stationary =  c(F),
                       allowdrift =  c(F),
-                      radius1=c(10),
-                      radius2=c(30),
-                      include_ratio=c(F),
-                      spatial_step=c(5),
-                      modelsp=c('svm', 'lm'),
-                      decay=c(NA,10))
+                      fs.folder=c(NA,
+                                  file.path(fs.dir,"distance",288,3),
+                                  file.path(fs.dir,"CCF",288,3),
+                                  file.path(fs.dir,"CCFscaled",288,3)),
+                      threshold=c(0.1),
+                      ownlags=c(F))
+source(file.path("R","models_spvar.R"))
 
 # Run all models
-RunModels(mysample$data, series, ta, forecastingSteps, forecastEvery,
+RunModels(sampl$data, series, ta, forecastingSteps, forecastEvery,
                       validationSize, validationEnd, 
                       lagMatrix, shortestA, cvgrid, 
                       models.estimated.file, results.file,save.links.file)
@@ -251,34 +255,39 @@ RunModels(mysample$data, series, ta, forecastingSteps, forecastEvery,
 ```
 
 ```{r analyse_results}
+params <- c('trainingMinutes','allowdrift','stationary','arLags','include.mean','fs.folder','threshold','ownlags')
 
-# Choose models with optimal sets of tuned parameters for arLargs=3
-params <- c('trainingMinutes','allowdrift','stationary','arLags','ccfThreshold','include.mean','radius1','radius2','include_ratio', 'spatial_step','modelsp', 'decay')
-
-results <- readRDS(results.file)%>%mutate(modelsp=as.character(modelsp))
+results <- readRDS(results.file)
+results<-results%>%mutate(fs.folder=gsub(file.path(dir,"fs"),"",fs.folder))
 models.estimated <- readRDS(models.estimated.file)
 summary(results$actual)
-results<-results%>%filter(abs(actual)<200, abs(actual)>10)
-s<-cvSummary(results, mae, cumulative=F, params=params)%>%
-    mutate(modelid=paste(model,trainingMinutes, arLags, ccfThreshold,
-                         include.mean,stationary,allowdrift,radius1,radius2,include_ratio, spatial_step,modelsp,decay))%>%
+#results<-results%>%filter(abs(actual)>100)
+results%>%select(datetime,detector,actual,forecasted)
+actu<-mysample$data.orig%>%gather(key="detector", value="actual.orig", -one_of("datetime"))%>%
+  mutate(detector=gsub(".volume","",detector))
+r<-results%>%left_join(actu, by=c("datetime"="datetime","detector"="detector"))
+r1<-r%>%mutate(actual=actual+actual.orig,forecasted=forecasted+actual.orig)
+mymape <- function(actual,pred){
+          d<-abs((actual - pred)/actual)
+          d[d==Inf]<-NA
+           mape <- mean(d, na.rm = T)*100
+           return (mape)
+         }
+
+s<-cvSummary(r1, mymape, cumulative=F, params=params)%>%
+    mutate(modelid=paste(model,trainingMinutes, arLags, include.mean,fs.folder,threshold,ownlags))%>%
     mutate(modelid=gsub(" NA","",modelid))
 #saveRDS(s, summary.file)
 
 options(pillar.sigfig = 4)
 s%>%
     filter(forecast_horizon==3)%>%
-    group_by(model)%>%filter(MAE==min(MAE))%>%ungroup%>%select(-c('allowdrift','stationary','include.mean'))
+    group_by(modelid)%>%filter(MYMAPE==min(MYMAPE))%>%ungroup%>%select(-c('allowdrift','stationary','include.mean'))%>%print(n=50)
 
-s%>%filter(model=="SpatialARIMAX",forecast_horizon==3)%>%ungroup%>%select(MAE,q95, modelid)%>%print(n=50)
-s%>%filter(model=="SpatialSVR",forecast_horizon==3)%>%ungroup%>%select(RMSE,q95, modelid)%>%print(n=50)
 
-#autoArimaXForecast(mysample$data[1:7200,series],forecastingSteps=1, shortestA=shortestA,stationary=T, allowdrift =F, allowmean = F,
-#                              radius1=5, radius2=10, verbose=F,include_ratio=F,spatial_step=0)
-
-winners3 <- s%>%
+(winners3 <- s%>%
     filter(forecast_horizon==3)%>%
-    group_by(model)%>%filter(MAE==min(MAE))%>%ungroup
+    group_by(model)%>%filter(MAE==min(MAE))%>%ungroup%>%select(-c('allowdrift','stationary','include.mean')))
 
 
  results.cum <-results%>%

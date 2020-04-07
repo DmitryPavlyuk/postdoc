@@ -1,0 +1,6 @@
+"node_name","corridor_route","corridor_dir","node_lon","node_lat","node_lanes","node_shift","node_s_limit","node_seq_number","node_n_type","node_transition","node_label","node_attach_side","node_active","node_forks","node_pickable","node_station_id","node_above","corridor_name","node_name_seq"
+"rnd_88413","I-394","WB",-93.36188,44.97117,4,7,NA,43,NA,NA,"Colorado Ave",NA,NA,NA,NA,"S336",NA,"I-394 WB","I-394 WB_0043"
+"rnd_88433","I-394","WB",-93.40946,44.97323,4,7,NA,57,NA,NA,"Shelard Pkwy",NA,NA,NA,NA,"S341",NA,"I-394 WB","I-394 WB_0057"
+"rnd_88443","I-394","WB",-93.43134,44.97108,3,6,NA,63,NA,NA,"Ridgedale Dr",NA,NA,NA,NA,"S343",NA,"I-394 WB","I-394 WB_0063"
+"rnd_89903","I-494","EB",-93.0435,44.87448,3,6,60,190,NA,NA,"7th Ave",NA,NA,NA,TRUE,"S1204",NA,"I-494 EB","I-494 EB_0190"
+"rnd_89465","I-494","EB",-93.00248,44.88693,3,6,60,211,NA,NA,"T.H.61",NA,NA,NA,TRUE,"S1022","t","I-494 EB","I-494 EB_0211"
