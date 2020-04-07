@@ -50,10 +50,285 @@ source(file.path("R","models_spatial.R"))
 dir<-"TRC2020"
 models.estimated.file <- file.path(dir,"models.rds")
 results.file <- file.path(dir,"results.rds")
-sample.rds <- file.path(dir,"ALL5.rds")
+complete.rds <- file.path("data","prepared","ALL5-original.rds")
+sample.rds <- file.path(dir,"data64.rds")
 ta<-5
 ```
 
+
+
+```{r new_sampling}
+
+if (!file.exists(sample.rds)){
+mysample <- readRDS(complete.rds)
+colnames(mysample$data)<-gsub('.volume','',colnames(mysample$data))
+series<-colnames(mysample$data)[-1]
+central.node<-"rnd_90797"
+center<-mysample$config.nodes%>%filter(node_name==central.node)%>%select(node_lon,node_lat)%>%as.list
+nodes<-mysample$config.nodes%>%filter(node_name %in% series)%>%rowwise()%>%filter(distHaversine(c(node_lon,node_lat),c(center$node_lon,center$node_lat))<25000)
+write.csv(nodes,file.path(dir,"nodes-all.csv"), row.names = F)
+
+series <- nodes%>%select(node_name)%>%pull
+
+morning.rush<-mysample$data%>%filter(hour(datetime)>=7 & hour(datetime)<10 & !(weekdays(datetime)%in%c("Sunday", "Saturday")))
+
+evening.rush<-mysample$data%>%filter(hour(datetime)>=17 & hour(datetime)<20 & !(weekdays(datetime)%in%c("Sunday", "Saturday")))
+
+selectMostImportant <- function(data, series, rho, topn, shortest, distance.lim=4){
+  m.cor<-stats::cor(data[,series])
+  m.cor[is.na(m.cor)]<-0
+  gl.m <- glasso::glasso(m.cor,rho=rho)
+  rs.m<-as_tibble(rowSums(abs(gl.m$wi)>0))%>%mutate(node=series)
+  hist(rs.m%>%select(value)%>%pull)
+  s.m<-rs.m%>%top_n(topn, wt=value)%>%arrange(desc(value))%>%select(node)%>%pull
+  s.m.filtered <- c()
+  for (s in s.m){
+    ser<-c(s,s.m.filtered)
+    m<-shortest[ser,ser]
+    if (min(m+(distance.lim+0.01)*diag(ncol(m)))>=distance.lim){
+      s.m.filtered<-append(s.m.filtered,s)
+    }
+  }
+  return(s.m.filtered)
+}
+
+
+morning.nodes <- selectMostImportant(morning.rush, series = c(series), 
+                    rho=0.3, topn = 30, shortest=mysample$shortest.distances)
+length(morning.nodes)
+write.csv(mysample$config.nodes%>%filter(node_name %in% morning.nodes),file.path(dir,"nodes-MR.csv"),  row.names = F)
+
+evening.nodes <- selectMostImportant(evening.rush, series = c(series), 
+                    rho=0.3, topn = 30, shortest=mysample$shortest.distances)
+length(evening.nodes)
+write.csv(mysample$config.nodes%>%filter(node_name %in% evening.nodes),file.path(dir,"nodes-ER.csv"),  row.names = F)
+
+write.csv(mysample$config.nodes%>%filter(node_name %in% gsub('.volume','',intersect(morning.nodes,evening.nodes))),file.path(dir,"nodes-ER+MR.csv"),  row.names = F)
+
+series <- union(morning.nodes,evening.nodes)
+
+dat<-mysample$data.orig%>%gather(key = "node", value="value", -datetime)%>%filter(node %in% paste0(series,".volume"))%>%mutate(node=gsub(".volume","",node), dt=format(datetime, "%H:%M"))%>%group_by(node,dt)%>%summarize(value=median(value))
+dat%>%filter(node %in% morning.nodes)%>%ggplot(aes(x = dt, y = value, col=node, group=node)) + geom_line()
+dat%>%filter(node %in% evening.nodes)%>%ggplot(aes(x = dt, y = value, col=node, group=node)) + geom_line()
+
+sampl<-list(data = mysample$data[,c("datetime",series)],
+               shortest.distances=mysample$shortest.distances[series,series])
+saveRDS(sampl, file=sample.rds)
+}else{
+  sampl <- readRDS(sample.rds)
+}
+print(ncol(sampl$data))
+series <- colnames(sampl$data)[-1]
+
+# Prepare a matrix of maximal lags (for travel time regularisation)
+lagMatrix <- round(sampl$shortest.distances / ta)
+lagMatrix[is.infinite(lagMatrix)]<-0
+lagMatrix<-lagMatrix[as.vector(series),as.vector(series)]
+
+
+shortestA <- sampl$shortest.distances
+
+d<-c()
+for (i in seq(1, 60)){
+  d<-append(d,length(shortestA[shortestA<i])/ncol(shortestA))
+}
+dat<-tibble(x=seq(1, 60), d=d)
+ggplot(dat, aes(x, d)) + geom_line(colour="red")+xlab("Travel time")+ylab("% of reached nodes")
+
+d<-tibble(av=as.vector(shortestA[shortestA<Inf]))
+ggplot(d, aes(av)) + geom_density(alpha = 0.1,fill="red", colour="red")
+
+gr<-shortestA
+gr[gr>15]<-0
+mean(gr[gr>0])
+needs(igraph)
+g<-graph_from_adjacency_matrix(gr, mode = "directed", weighted = T)
+#tkplot(g, vertex.size=7, vertex.color="lightblue", vertex.label=NA,edge.arrow.size=0.5, edge.width=E(g)$weight*0.1)
+comp<-components(g, mode = "weak")
+```
+
+
+```{r fs}
+install.packages("fsMTS", repos="http://R-Forge.R-project.org")
+needs(fsMTS)
+needs(plot.matrix)
+source(file.path("R","cv_functions.R"))
+estimateFeatures(fs.function=fsMTS::fsMTS, 
+                 data = sampl$data, 
+                 seriesNames = series,
+                 trainingWindowSize = 12*24*0.5,
+                 forecastEvery = 1,
+                 max.lag = 3,
+                 fs.folder = file.path(dir,"fs",length(series),"CCF"),
+                 req.packages = c("fsMTS"),
+                 method="CCF",
+                 shortest = shortestA,
+                 step = ta,
+                 localized = F
+                 )
+
+m=as.matrix(mysample$data[1:144,series])
+fsMTS::fsMTS(mts=as.matrix(mysample$data[1:144,series]), max.lag=3,method="LARS")
+
+res1<-readRDS(file.path(dir,"fs","GLASSO",288,3,0.1, "2017-08-06_000000.rds"))
+res1<-readRDS(file.path(dir,"fs","GLASSO",288,3,0.5, "2017-08-07_000000.rds"))
+plot(res1)
+plot(fsMTS::cutoff(res1, 0.01))
+fsMTS::fsSimilarity(res1, res2,cutoff=T, threshold = 0.01, method="Kuncheva")
+
+```
+
+```{r fs_stability}
+require(needs)
+needs(ggplot2)
+needs(tibbletime)
+needs(tidyverse)
+needs(svMisc)
+needs(rlist)
+needs(plot.matrix)
+needs(fsMTS)
+
+
+oneStepSimilarity <- function(folder, date.from,date.to, threshold, method){
+  dates <- seq(from=date.from, to=date.to, by="5 min")
+  res <- NULL
+  fs.prev<-NULL
+  for(row in 1:length(dates)){
+    name<-format(dates[row],fmt)
+    filename <- paste0(name,".rds")
+    if (file.exists(file.path(folder, filename))){
+      fs <- readRDS(file.path(folder, filename))
+      if (!is.null(fs.prev)){
+        res <- bind_rows(res,
+                         list(datetime=dates[row], 
+                         similarity=fsMTS::fsSimilarity(fs.prev, fs,cutoff=T, 
+                                                        threshold = threshold, method=method),
+                         threshold = threshold,
+                         method=method,
+                         key=folder))
+      }
+      fs.prev <- fs
+    }else{
+      fs.prev <- NULL
+    }
+  }
+  return(res)
+}
+
+folder<-file.path("C:/tmp/32","CCF",144,3)
+fmt <- "%Y-%m-%d_%H%M%S"
+date.from <- as.POSIXct("2017-07-31_000000",format=fmt)
+date.to <- as.POSIXct("2017-10-07_000000",format=fmt)
+
+sim.tibble<-NULL
+for (th in c(0.99)){
+  for (method in c("Jaccard", "Kuncheva")){
+    print(paste("Estimating: threshold=",th,", method=", method))
+    r<-oneStepSimilarity(folder, date.from,date.to, threshold=th, method=method)
+    sim.tibble<- bind_rows(sim.tibble, r)
+  }
+}
+
+res<-sim.tibble%>%mutate(dow_time=format(datetime,"%w %H:%M"))
+
+res%>%filter(method=="Kuncheva")%>%mutate(key=paste(key, threshold))%>%group_by(key,dow_time)%>%summarise(mean.similarity=mean(similarity))%>%ggplot(aes(x = dow_time, y=mean.similarity, group=key, col=key))+geom_line()
+
+stat<-res%>%group_by(method,key,threshold)%>%summarise(mean.similarity=mean(similarity))
+stat%>%ungroup%>%mutate(key=paste(key, method))%>%group_by(key)%>%ggplot(aes(x = threshold, y=mean.similarity, group=key, col=key))+geom_line()
+```
+```{r}
+
+fs <- readRDS(file.path(folder,"2017-07-31_080000.rds"))
+res<-as_tibble(cutoff(fs,0.1),rownames = "lnode")%>%gather(key="node", value="value",-one_of("lnode"))%>%filter(value==1)%>%
+  mutate(lag=as.numeric(substr(lnode,regexpr(".l",lnode)+2,length(lnode))),
+         related_node=substr(lnode,1,regexpr(".l",lnode)-1))%>%select(node,related_node,lag)
+res%>%group_by(node,lag)%>%summarise(n=n())%>%arrange(node,desc(n))%>%print(n=100)
+
+res%>%filter(node=="rnd_95775")%>%print(n=30)
+related<-res%>%filter(node=="rnd_95775")%>%select(related_node)%>%pull
+write.csv(mysample$config.nodes%>%filter(node_name %in% related)%>%inner_join(res%>%filter(node=="rnd_95775"), by=c("node_name"="related_node")),file.path(dir,"nodes-lag1.csv"),  row.names = F)
+
+```
+
+```{r}
+dates <- seq(from=date.from, to=date.to, by="5 min")
+
+mlist<-list()
+for(row in 1:length(dates)){
+  name<-format(dates[row],fmt)
+  filename <- paste0(name,".rds")
+  if (file.exists(file.path(folder, filename))){
+    fs <- readRDS(file.path(folder, filename))
+    mlist[[name]]<-fs
+  }
+}
+msim<-fsSimilarityMatrix(mlist,threshold=0.2,method="Kuncheva")
+image(msim)
+mean(msim)
+max(msim)
+
+k
+needs(cluster)
+d<-1/msim
+hc<-hclust(as.dist(d))
+(memb <- cutree(hc, k = 3))
+
+HC <- hclust(as.dist(d), method="single")
+plot(2:10, sapply(2:10, function(i) { 
+   mean(silhouette(cutree(HC, i), dmatrix=d)[,"sil_width"]) }),
+   xlab="Number of clusters", ylab="Average Silhouette", type="b", pch=20)
+
+
+simils <- tibble(datetime = dates,CCF=NA, CCFvsMean=NA, CCFaveg = NA, CCFsmoothed = NA)
+mean.fs <- readRDS(file.path("C:/tmp/32","CCF",20160,3,"2017-10-08_000000.rds"))
+
+fs.prev<-NULL
+fs.prev.smoothed<-NULL
+fs.smooth <- list()
+SMOOTH_SIZE <- 12
+thres<-0.01
+alpha = 0.4
+
+image(cutoff(mean.fs, thres))
+image(cutoff(mlist[[54]], thres))
+
+for(row in 1:nrow(simils)){
+  filename <- paste0(format(simils[row,]$datetime,fmt),".rds")
+  if (file.exists(file.path(folder, filename))){
+    fs <- readRDS(file.path(folder, filename))
+    if (!is.null(fs.prev)){
+      simils[row,]$CCF<-fsMTS::fsSimilarity(fs.prev, fs,cutoff=T, threshold = thres, method="Kuncheva")
+    }
+    simils[row,]$CCFvsMean<-fsMTS::fsSimilarity(mean.fs, fs,cutoff=T, threshold = thres, method="Kuncheva")
+    
+    fs.cut<-fsMTS::cutoff(fs,threshold = thres)
+    fs.smooth<-list.prepend(fs.smooth, row=fs.cut)
+    if (length(fs.smooth)>SMOOTH_SIZE) fs.smooth<-list.remove(fs.smooth, length(fs.smooth))
+    
+    smoothed <- matSmoothing(fs.smooth,alpha)
+    if (!is.null(fs.prev.smoothed)){
+      simils[row,]$CCFsmoothed<-fsMTS::fsSimilarity(fs.prev.smoothed, smoothed,cutoff=T, 
+                                                    threshold = thres, method="Kuncheva")
+    }
+    
+    simils[row,]$CCFaveg <- mean(fs, na.rm = T)
+    
+    fs.prev.smoothed<-smoothed
+    fs.prev <- fs
+  }
+  svMisc::progress(100*row/nrow(simils))
+}
+
+mean_roll <- rollify(mean, window = 24)
+
+simils<-simils%>%mutate(CCF.ma=mean_roll(CCF))
+
+simils%>%select(datetime,CCF,CCFsmoothed,CCF.ma,CCFvsMean)%>%gather(key="key", value="value",-one_of("datetime"))%>%
+  ggplot(aes(x = datetime, y=value, group=key, col=key))+geom_line()
+
+summary(simils)
+simils
+```
 
 ```{r models}
 RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
@@ -93,213 +368,6 @@ RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
     print(Sys.time() - start.time)
   }
 }
-```
-
-
-```{r plot_map}
-mysample <- readRDS(sample.rds)
-series <- colnames(mysample$data)[-1]
-
-central.node<-"rnd_90797"
-center<-mysample$config.nodes%>%filter(node_name==central.node)%>%select(node_lon,node_lat)%>%as.list
-
-set.seed(0)
-nodes<-mysample$config.nodes%>%filter(node_name %in% gsub('.volume','',series))%>%rowwise()%>%filter(distHaversine(c(node_lon,node_lat),c(center$node_lon,center$node_lat))<20000)
-write.csv(nodes,file.path(dir,"nodes-all.csv"), row.names = F)
-set.seed(0)
-nodes<-nodes%>%sample_n(100)
-series<-nodes%>%select(node_name)%>%pull
-write.csv(nodes,file.path(dir,"nodes-sample.csv"),  row.names = F)
-```
-
-```{r sampling}
-series<-paste0(series,".volume")
-#series <- colnames(mysample$data)[-1]
-
-#set.seed(0)
-#series<- sample(series, 10, replace = F)
-mysample$data<-mysample$data[,c("datetime",series)]
-
-# print(paste("Number of series", length(series)))
-# v<-mysample$shortest.distances
-# v<-v[v!=0]
-# v<-v[v!=Inf]
-# mean(v)
-
-# Prepare a matrix of maximal lags (for travel time regularisation)
-lagMatrix <- round(mysample$shortest.distances / ta)
-lagMatrix[is.infinite(lagMatrix)]<-0
-rownames(lagMatrix)<-paste0(rownames(lagMatrix),".volume")
-colnames(lagMatrix)<-paste0(colnames(lagMatrix),".volume")
-lagMatrix<-lagMatrix[as.vector(series),as.vector(series)]
-
-
-shortestA <- mysample$shortest.distances
-shortestA<-shortestA[as.vector(gsub(".volume","",series)),as.vector(gsub(".volume","",series))]
-
-d<-c()
-for (i in seq(1, 60)){
-  d<-append(d,length(shortestA[shortestA<i])/ncol(shortestA))
-}
-dat<-tibble(x=seq(1, 60), d=d)
-ggplot(dat, aes(x, d)) + geom_line(colour="red")+xlab("Travel time")+ylab("% of reached nodes")
-
-d<-tibble(av=as.vector(shortestA[shortestA<Inf]))
-ggplot(d, aes(av)) + geom_density(alpha = 0.1,fill="red", colour="red")
-
-gr<-shortestA
-gr[gr>15]<-0
-mean(gr[gr>0])
-needs(igraph)
-g<-graph_from_adjacency_matrix(gr, mode = "directed", weighted = T)
-#tkplot(g, vertex.size=7, vertex.color="lightblue", vertex.label=NA,edge.arrow.size=0.5, edge.width=E(g)$weight*0.1)
-
-comp<-components(g, mode = "weak")
-
-
-rotate <- function(x) t(apply(x, 2, rev))
-
-nodes<-mysample$config.nodes%>%filter(node_name %in% gsub('.volume','',series))
-cs<-nodes%>%arrange(node_lon)%>%select(node_name)%>%pull
-rs<-nodes%>%arrange(node_lat)%>%select(node_name)%>%pull
-
-
-gr<-1/shortestA[cs,rs]
-g<-graph_from_adjacency_matrix(gr, mode = "directed", weighted = T)
-L<-as.matrix(laplacian_matrix(g, normalized = T))
-L<-L-diag(nrow(L))*L
-L<-rotate(rotate(rotate(L)))
-L[L<(-0.05)]<- (-0.05)
-image(L, xlab="Latitute",ylab="Longitude", axes=F, col=heat.colors(255))
-
-```
-
-
-```{r fs}
-install.packages("fsMTS", repos="http://R-Forge.R-project.org")
-require(needs)
-needs(fsMTS)
-needs(plot.matrix)
-source(file.path("R","cv_functions.R"))
-estimateFeatures(fs.function=fsMTS::fsMTS, 
-                 data = mysample$data, 
-                 seriesNames = series,
-                 trainingWindowSize = 12*24*0.5,
-                 forecastEvery = 12*24, 
-                 max.lag = 3,
-                 clusterNumber=1,
-                 fs.folder = file.path(dir,"fs","PSC"),
-                 req.packages = c("fsMTS"),
-                 method="PSC",
-                 shortest = shortestA,
-                 step = ta
-                 )
-
-res1<-readRDS(file.path(dir,"fs","GLASSO",288,3,0.1, "2017-08-06_000000.rds"))
-res1<-readRDS(file.path(dir,"fs","GLASSO",288,3,0.5, "2017-08-07_000000.rds"))
-plot(res1)
-plot(fsMTS::cutoff(res1, 0.01))
-fsMTS::fsSimilarity(res1, res2,cutoff=T, threshold = 0.01, method="Kuncheva")
-
-```
-
-```{r fs_stability}
-needs(ggplot2)
-needs(tibbletime)
-needs(tidyverse)
-needs(svMisc)
-needs(rlist)
-needs(plot.matrix)
-
-folder<-file.path("C:/tmp/","MI",144)
-fmt <- "%Y-%m-%d_%H%M%S"
-date.from <- as.POSIXct("2017-07-31_000000",format=fmt)
-date.to <- as.POSIXct("2017-08-01_000000",format=fmt)
-
-
-dates <- seq(from=date.from, to=date.to, by="5 min")
-
-mlist<-list()
-for(row in 1:length(dates)){
-  name<-format(dates[row],fmt)
-  filename <- paste0(name,".rds")
-  if (file.exists(file.path(folder, filename))){
-    fs <- readRDS(file.path(folder, filename))
-    mlist[[name]]<-fs
-  }
-}
-msim<-fsSimilarityMatrix(mlist,threshold=0.01,method="Kuncheva")
-image(msim)
-
-needs(cluster)
-d<-1/msim
-hc<-fastcluster::hclust(as.dist(d))
-plot(res)
-(memb <- cutree(hc, k = 5))
-
-HC <- hclust(as.dist(d), method="single")
-plot(2:10, sapply(2:10, function(i) { 
-   mean(silhouette(cutree(HC, i), dmatrix=d)[,"sil_width"]) }),
-   xlab="Number of clusters", ylab="Average Silhouette", type="b", pch=20)
-
-
-simils <- tibble(datetime = dates,CCF=NA, CCFvsMean=NA, CCFaveg = NA, CCFsmoothed = NA)
-mean.fs <- NULL
-for(row in 1:nrow(simils)){
-  filename <- paste0(format(simils[row,]$datetime,fmt),".rds")
-  if (file.exists(file.path(folder, filename))){
-    fs <- readRDS(file.path(folder, filename))
-    if (is.null(mean.fs)){
-      mean.fs<-fs  
-    }else{
-      mean.fs <- mean.fs+fs
-    }
-  }
-}
-
-fs.prev<-NULL
-fs.prev.smoothed<-NULL
-fs.smooth <- list()
-SMOOTH_SIZE <- 12
-thres<-0.01
-m.fs <- fsMTS::cutoff(mean.fs,thres)
-alpha = 0.4
-for(row in 1:nrow(simils)){
-  filename <- paste0(format(simils[row,]$datetime,fmt),".rds")
-  if (file.exists(file.path(folder, filename))){
-    fs <- readRDS(file.path(folder, filename))
-    if (!is.null(fs.prev)){
-      simils[row,]$CCF<-fsMTS::fsSimilarity(fs.prev, fs,cutoff=T, threshold = thres, method="Kuncheva")
-    }
-    simils[row,]$CCFvsMean<-fsMTS::fsSimilarity(m.fs, fs,cutoff=T, threshold = thres, method="Kuncheva")
-    
-    fs.cut<-fsMTS::cutoff(fs,threshold = thres)
-    fs.smooth<-list.prepend(fs.smooth, row=fs.cut)
-    if (length(fs.smooth)>SMOOTH_SIZE) fs.smooth<-list.remove(fs.smooth, length(fs.smooth))
-    
-    smoothed <- matSmoothing(fs.smooth,alpha)
-    if (!is.null(fs.prev.smoothed)){
-      simils[row,]$CCFsmoothed<-fsMTS::fsSimilarity(fs.prev.smoothed, smoothed,cutoff=T, 
-                                                    threshold = thres, method="Kuncheva")
-    }
-    
-    simils[row,]$CCFaveg <- mean(fs, na.rm = T)
-    
-    fs.prev.smoothed<-smoothed
-    fs.prev <- fs
-  }
-  svMisc::progress(100*row/nrow(simils))
-}
-
-mean_roll <- rollify(mean, window = 24)
-
-simils<-simils%>%mutate(CCF.ma=mean_roll(CCF))
-
-simils%>%select(datetime,CCF,CCFsmoothed)%>%gather(key="key", value="value",-one_of("datetime"))%>%
-  ggplot(aes(x = datetime, y=value, group=key, col=key))+geom_line()
-
-summary(simils)
-simils
 ```
 
 ```{r experiments}
