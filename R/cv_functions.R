@@ -94,6 +94,57 @@ estimateFeatures <- function(fs.function, data, seriesNames,trainingWindowSize,
   return("OK")
 }
 
+daySec<-function(datetime){
+  return(as.numeric(3600*hour(datetime)+60*minute(datetime)+second(datetime)))
+}
+
+estimateFeaturesGlobal <- function(fs.function, data, seriesNames,trainingWindowSize,
+                             forecastEvery, max.lag,ta,fs.folder,
+                             req.functions=c(),req.packages=c(),
+                             clusterNumber=detectCores()-1,
+                             outfile="estimate-features.log",...){
+  n <- nrow(data)
+  validationSize <- 24*60/ta
+  if (clusterNumber>1){
+    cl <- makeCluster(clusterNumber, outfile=outfile)
+    registerDoParallel(cl)
+  }
+  opts <- list(...)
+  seqVals <- seq(1,validationSize, by=forecastEvery)
+  print(paste("Timestamps:", length(seqVals),"Number of clusters:",clusterNumber))
+  folder <- file.path(fs.folder,trainingWindowSize, max.lag)
+  if (!is.null(opts$rho) & (opts$method=="GLASSO")) folder <- file.path(folder,opts$rho)
+  if (!file.exists(folder)) dir.create(folder, recursive = T)
+  res <- foreach (i = seqVals,.export=req.functions,
+                  .packages=req.packages) %dopar% {
+                    from<-daySec(data[i,]$datetime)
+                    wd <- wday(data[i,]$datetime-from)
+                    rto<-daySec(data[(i+trainingWindowSize-1),]$datetime)
+                    print(paste(data[i,]$datetime," - ",data[(i+trainingWindowSize-1),]$datetime))
+                    to<-rto + max.lag*ta*60
+                    dif<-ifelse(to>from,to-from,to+3600*24-from)
+                    dif2<-ifelse(rto>from,rto-from,rto+3600*24-from)
+                    dat<-data%>%mutate(h=daySec(datetime - from))%>%
+                      filter(h<=dif,wday(datetime-from)==wd)%>%arrange(datetime)
+                    dat[dat$h>dif2,-1]<-NA
+                    mts <- as.matrix(dat%>%select(-one_of("datetime","h")))
+                    print(paste("Observations:",nrow(dat)))
+                    filename<-paste0(rto,".rds")
+                    filename <-gsub(" ","_", filename)
+                    filename <-gsub(":","", filename)
+                    filename <- file.path(folder,filename)
+                    if (file.exists(filename)){
+                      print(paste("FS file exists: ", filename, ". Feature selection skipped"))
+                    }else{
+                      print(paste("Preparing", filename))
+                      fs <- fs.function(mts, max.lag=max.lag, ...)
+                      print(paste("Saving", filename))
+                      saveRDS(fs,file=filename)
+                    }
+                  }
+  return("OK")
+}
+
 cvSummary <- function(results,fun, cumulative=F, params=c()){
   n <- toupper(substitute(fun))
   g <- c('model',params)

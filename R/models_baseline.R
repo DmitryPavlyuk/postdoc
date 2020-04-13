@@ -63,6 +63,7 @@ autoArimaForecast <-function(sampl, forecastingSteps, stationary=T, allowdrift =
   for (i in 1:ncol(sampl)){
     dat <- sampl[,i]
     fit <- auto.arima(dat, stationary=stationary, allowdrift = allowdrift, allowmean = allowmean)
+    print(paste("Model",as.character(fit)))
     f <- as.vector(forecast::forecast(fit,forecastingSteps)$mean)
     m[,i] <- f
   }

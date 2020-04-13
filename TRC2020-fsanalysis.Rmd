@@ -92,6 +92,11 @@ oneStepSimilarity <- function(folder, date.from,date.to, threshold, method){
   return(res)
 }
 
+fs1 <- readRDS("C:/Dmitry/projects/postdoc/TRC2020/fs/64/RF/4032/3/2017-08-13_000000.rds")
+fs2 <- readRDS("C:/Dmitry/projects/postdoc/TRC2020/fs/64/RF/20160/3/2017-10-08_000000.rds")
+cor(as.vector(fs1),as.vector(fs2))
+fsMTS::fsSimilarity(fs1,fs2, cutoff=T, threshold=0.5, method = "Kuncheva")
+
 folder<-file.path("C:/tmp/32","CCF",144,3)
 fmt <- "%Y-%m-%d_%H%M%S"
 date.from <- as.POSIXct("2017-07-31_000000",format=fmt)

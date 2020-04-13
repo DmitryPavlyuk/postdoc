@@ -10,7 +10,12 @@ starForecast <-function(sampl, forecastingSteps, arLags,threshold, fs.folder=NA,
     filename <-gsub(" ","_", last_date)
     filename <-paste0(gsub(":","", filename),".rds")
     filename <- file.path(fs.folder, filename)
+    if (!file.exists(filename)){
+      ds <- daySec(as.POSIXct(last_date, format="%Y-%m-%d %H:%M:%S"))
+      filename <- file.path(fs.folder, paste0(ds,".rds"))
+    } 
     if (!file.exists(filename)) stop(paste("No feature set found: ",filename))
+    print(paste("Using ",filename))
     fixed <- readRDS(filename)
     fixed<-fsMTS::cutoff(fixed, threshold)
     if (ownlags) {
@@ -23,7 +28,8 @@ starForecast <-function(sampl, forecastingSteps, arLags,threshold, fs.folder=NA,
   }
   
   if(arLags==0){
-    m1<-MTS::VARorder(sampl,output=F)
+    m1<-MTS::VARorder(sampl,maxp = 20, output=F)
+    print(paste("Order", m1$aicor))
     arLags <- m1$aicor
   }
   sink(tempfile())
@@ -49,8 +55,8 @@ starForecast <-function(sampl, forecastingSteps, arLags,threshold, fs.folder=NA,
 xModel.star <- list(
   name="STAR",
   run = starForecast,
-  functions = c('randomStr',"shift"),
-  packages = c('tidyverse','matrixStats','tseries','MTS','tibble', 'fsMTS')
+  functions = c('randomStr',"shift", "daySec"),
+  packages = c('tidyverse','matrixStats','tseries','MTS','tibble', 'fsMTS','lubridate')
 )
 
 

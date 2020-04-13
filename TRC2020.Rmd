@@ -159,22 +159,61 @@ comp<-components(g, mode = "weak")
 install.packages("fsMTS", repos="http://R-Forge.R-project.org")
 needs(fsMTS)
 needs(plot.matrix)
+needs(lubridate)
 source(file.path("R","cv_functions.R"))
 data.scaled<-cbind(sampl$data[,1],scale(sampl$data[,-1]))
 estimateFeatures(fs.function=fsMTS::fsMTS, 
                  data = sampl$data, 
                  seriesNames = series,
-                 trainingWindowSize = 36,#12*24*0.5,
+                 trainingWindowSize = nrow(sampl$data),#12*24*0.5,
                  forecastEvery = 1,
                  max.lag = 3,
-                 fs.folder = file.path(dir,"fs",length(series),"CCF"),
+                 fs.folder = file.path(dir,"fs",length(series),"GLASSOloc"),
                  req.packages = c("fsMTS"),
-                 method="CCF",
-                 rho=0.1,
+                 method="GLASSO",
+                 rho=0.3,
                  shortest = shortestA,
                  step = ta,
-                 localized = F
+                 localized = T,
+                 clusterNumber=7
                  )
+
+
+source(file.path("R","cv_functions.R"))
+estimateFeaturesGlobal(fs.function=fsMTS::fsMTS, 
+                 data = sampl$data, 
+                 seriesNames = series,
+                 trainingWindowSize = 36,
+                 forecastEvery = 1,
+                 max.lag = 3,
+                 ta=ta,
+                 fs.folder = file.path(dir,"fs",length(series),"MIlocg"),
+                 req.packages = c("fsMTS","lubridate","tibble","tidyverse"),
+                 method="MI",
+                 rho=0.3,
+                 shortest = shortestA,
+                 req.functions=c("daySec"),
+                 step = ta,
+                 localized = T,
+                 clusterNumber = 7
+                 )
+
+
+from<-daySec(as.POSIXct("00:05", format="%H:%M"))
+wd <- wday(as.POSIXct("00:25", format="%H:%M")-from)
+rto<-daySec(as.POSIXct("00:25", format="%H:%M"))
+to<-rto + 3*ta*60
+dif<-ifelse(to>from,to-from,to+3600*24-from)
+dif2<-ifelse(rto>from,rto-from,rto+3600*24-from)
+
+sampl$data[5,]$datetime
+sampl$data[5,]$datetime - from
+
+dat<-sampl$data%>%mutate(h=daySec(datetime - from))%>%filter(h<=dif,wday(datetime-from)==wd)%>%arrange(datetime)
+dat[dat$h>dif2,-1]<-NA
+dat
+fsMTS::fsMTS(as.matrix(dat%>%select(-one_of("datetime","h"))),max.lag = 3, method = "CCF")
+
 ```
 
 ```{r models}
@@ -212,18 +251,19 @@ RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
 
 ```{r experiments}
 dat<-as.data.frame(sampl$data)
-rownames(dat)<-format(dat$datetime,"%Y-%m-%d_%H%M%S")
+rownames(dat)<-format(dat$datetime,"%Y-%m-%d %H:%M:%S")
 
 fs.dir<-file.path(dir,"fs",length(series))
-xModel.star$run(dat[1:576,series], forecastingSteps=3, arLags=3, 
-                fs.folder=file.path(fs.dir,"CCF",144,3), 
+source(file.path("R","models_spvar.R"))
+xModel.star$run(dat[1:1440,series], forecastingSteps=3, arLags=3, 
+                fs.folder=file.path(dir,"fs",length(series),"CCFg",12,3), 
                 control=list(),
                 returnModel=F, 
                 refine = F, 
                 include.mean=F, 
                 verbose=T,
                 exclude.series=NULL,
-                threshold=0.01)
+                threshold=0.1)
 
 validationSize <- nrow(sampl$data)-12*60*10/ta
 validationEnd <- nrow(sampl$data)
@@ -234,20 +274,18 @@ forecastingSteps<-12
 cvgrid <- expand.grid(trainingMinutes = c(12*60*10),
                       include.mean = c(F),
                       arLags = c(3),
-                      stationary =  c(F),
+                      stationary =  c(T),
                       allowdrift =  c(F),
-                      fs.folder=c(NA,
-                                  file.path(fs.dir,"distance",288,3),
-                                  file.path(fs.dir,"CCF",288,3),
-                                  file.path(fs.dir,"CCFscaled",288,3)),
-                      threshold=c(0.1),
-                      ownlags=c(F))
+                      fs.folder=c(file.path(dir,"fs",length(series),"CCFg",6,3)),
+                      threshold=c(0.2),
+                      ownlags=c(T))
 source(file.path("R","models_spvar.R"))
+source(file.path("R","cv_functions.R"))
 
 # Run all models
 RunModels(sampl$data, series, ta, forecastingSteps, forecastEvery,
                       validationSize, validationEnd, 
-                      lagMatrix, shortestA, cvgrid, 
+                      lagMatrix, shortestA, cvgrid,
                       models.estimated.file, results.file,save.links.file)
  
 ```
