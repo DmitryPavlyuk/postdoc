@@ -174,9 +174,9 @@ estimateFeatures(fs.function=fsMTS::fsMTS,
                  rho=0.3,
                  shortest = shortestA,
                  step = ta,
-                 show.progress=T,
                  localized = T,
-                 clusterNumber = 1
+                 show.progress=T,
+                 clusterNumber=1
                  )
 
 
@@ -196,7 +196,7 @@ estimateFeaturesGlobal(fs.function=fsMTS::fsMTS,
                  req.functions=c("daySec"),
                  step = ta,
                  localized = T,
-                 clusterNumber = 7
+                 clusterNumber = 1
                  )
 
 
@@ -266,18 +266,18 @@ xModel.star$run(dat[1:1440,series], forecastingSteps=3, arLags=3,
                 exclude.series=NULL,
                 threshold=0.1)
 
-validationSize <- nrow(sampl$data)-12*60*10/ta
+validationSize <- nrow(sampl$data)-12*60*14/ta
 validationEnd <- nrow(sampl$data)
-forecastEvery<-3*24
+forecastEvery<-1
 forecastingSteps<-12
 
 # Define a grid for tuning parameters
-cvgrid <- expand.grid(trainingMinutes = c(12*60*10),
+cvgrid <- expand.grid(trainingMinutes = c(12*60*14),
                       include.mean = c(F),
                       arLags = c(3),
                       stationary =  c(T),
                       allowdrift =  c(F),
-                      fs.folder=c(file.path(dir,"fs",length(series),"CCFg",6,3)),
+                      fs.folder=c(NA),
                       threshold=c(0.2),
                       ownlags=c(T))
 source(file.path("R","models_spvar.R"))
