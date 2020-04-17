@@ -104,7 +104,7 @@ estimateFeaturesGlobal <- function(fs.function, data, seriesNames,trainingWindow
                              clusterNumber=detectCores()-1,
                              outfile="estimate-features.log",...){
   n <- nrow(data)
-  validationSize <- 24*60/ta
+  validationSize <- 7*24*60/ta
   if (clusterNumber>1){
     cl <- makeCluster(clusterNumber, outfile=outfile)
     registerDoParallel(cl)
@@ -129,7 +129,7 @@ estimateFeaturesGlobal <- function(fs.function, data, seriesNames,trainingWindow
                     dat[dat$h>dif2,-1]<-NA
                     mts <- as.matrix(dat%>%select(-one_of("datetime","h")))
                     print(paste("Observations:",nrow(dat)))
-                    filename<-paste0(rto,".rds")
+                    filename<-paste0(wd,"_",rto,".rds")
                     filename <-gsub(" ","_", filename)
                     filename <-gsub(":","", filename)
                     filename <- file.path(folder,filename)

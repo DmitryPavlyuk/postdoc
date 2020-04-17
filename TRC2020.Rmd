@@ -188,14 +188,14 @@ estimateFeaturesGlobal(fs.function=fsMTS::fsMTS,
                  forecastEvery = 1,
                  max.lag = 3,
                  ta=ta,
-                 fs.folder = file.path(dir,"fs",length(series),"MIlocg"),
+                 fs.folder = file.path(dir,"fs",length(series),"MIg"),
                  req.packages = c("fsMTS","lubridate","tibble","tidyverse"),
                  method="MI",
                  rho=0.3,
                  shortest = shortestA,
                  req.functions=c("daySec"),
                  step = ta,
-                 localized = T,
+                 localized = F,
                  clusterNumber = 1
                  )
 
