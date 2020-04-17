@@ -165,17 +165,18 @@ data.scaled<-cbind(sampl$data[,1],scale(sampl$data[,-1]))
 estimateFeatures(fs.function=fsMTS::fsMTS, 
                  data = sampl$data, 
                  seriesNames = series,
-                 trainingWindowSize = nrow(sampl$data),#12*24*0.5,
+                 trainingWindowSize = 4032,#nrow(sampl$data),#12*24*0.5,
                  forecastEvery = 1,
                  max.lag = 3,
-                 fs.folder = file.path(dir,"fs",length(series),"GLASSOloc"),
+                 fs.folder = file.path(dir,"fs",length(series),"MIloc"),
                  req.packages = c("fsMTS"),
-                 method="GLASSO",
+                 method="MI",
                  rho=0.3,
                  shortest = shortestA,
                  step = ta,
+                 show.progress=T,
                  localized = T,
-                 clusterNumber=7
+                 clusterNumber = 1
                  )
 
 

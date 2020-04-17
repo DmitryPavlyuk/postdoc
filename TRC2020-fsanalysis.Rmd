@@ -36,6 +36,13 @@ needs(stringr)
 needs(e1071 )
 needs(randomForest )
 needs(Boruta)
+needs(ggplot2)
+needs(tibbletime)
+needs(tidyverse)
+needs(svMisc)
+needs(rlist)
+needs(plot.matrix)
+needs(fsMTS)
 
 source(file.path("R","prepare_data_functions.R"))
 source(file.path("R","cv_functions.R"))
@@ -55,15 +62,56 @@ sample.rds <- file.path(dir,"data64.rds")
 ta<-5
 ```
 
+```{r localized_vs_global}
+folder <- "C:/tmp/fs/64"
+fname<-"MI"
+maxsize<-4032
+localized <- readRDS(file.path(folder,paste0(fname,"loc/",maxsize,"/3/2017-08-13_000000.rds")))
+global <- readRDS(file.path(folder,paste0(fname,"/",maxsize,"/3/2017-08-13_000000.rds")))
+cor(as.vector(localized), as.vector(global))
+df.compare <- data.frame(threshold=seq(0,1,by=0.05), similarity = NA)
+for (i in 1:nrow(df.compare))
+  df.compare[i,"similarity"]<-fsMTS::fsSimilarity(localized, global,cutoff=T, threshold = df.compare[i,"threshold"], method = "Kuncheva")
+df.compare
+image(localized)
+localised.folder <- file.path(folder,paste0(fname,"locg/36/3"))
+global.folder <- file.path(folder,paste0(fname,"g/36/3"))
+res<-NULL
+for (f in list.files(localised.folder )){
+  loc <- readRDS(file.path(localised.folder,f))
+  glob <- readRDS(file.path(global.folder,f))
+  for (thres in seq(0,1,by=0.05)){
+    res<-bind_rows(res,list(filename=f,threshold=thres, 
+                       similarity=fsMTS::fsSimilarity(loc, glob,cutoff=T, threshold =thres, method = "Kuncheva")))
+  }
+}
+res <-as_tibble(res)
+res<-res%>%mutate(sec=as.numeric(gsub(".rds","",filename)), time=(sec/3600))
+res.gr<-res%>%arrange(time)%>%group_by(time)%>%summarise(minsimilarity=min(similarity),maxsimilarity=max(similarity))
+res.gr%>%ggplot(aes(x = time, y=minsimilarity))+geom_line()
+
+localised.folder <- file.path(folder,paste0(fname,"loc/36/3"))
+global.folder <- file.path(folder,paste0(fname,"/36/3"))
+res2<-NULL
+for (f in list.files(localised.folder )){
+  loc <- readRDS(file.path(localised.folder,f))
+  glob <- readRDS(file.path(global.folder,f))
+  for (thres in seq(0,1,by=0.05)){
+    res2<-bind_rows(res2,list(filename=f,threshold=thres, 
+                       similarity=fsMTS::fsSimilarity(loc, glob,cutoff=T, threshold =thres, method = "Kuncheva")))
+  }
+  print(f)
+}
+res2 <-as_tibble(res2)
+fmt <- "%Y-%m-%d_%H%M%S"
+res2<-res2%>%filter(threshold>0.0)%>%mutate(time=as.POSIXct(gsub(".rds","",filename),format=fmt, tz="GMT"))%>%mutate(dow_time=format(time,"%w %H:%M", tz="GMT"))
+saveRDS(res2, file.path(dir,paste0(fname,"_localised_vs_global.rds")))
+
+res2.gr<-res2%>%filter(threshold==0.1)%>%arrange(dow_time)%>%group_by(dow_time)%>%summarise(time=min(time),minsimilarity=min(similarity),maxsimilarity=max(similarity))
+res2.gr%>%ggplot(aes(x = time, y=minsimilarity))+geom_line()
+```
+
 ```{r fs_stability}
-require(needs)
-needs(ggplot2)
-needs(tibbletime)
-needs(tidyverse)
-needs(svMisc)
-needs(rlist)
-needs(plot.matrix)
-needs(fsMTS)
 
 
 oneStepSimilarity <- function(folder, date.from,date.to, threshold, method){
@@ -92,19 +140,14 @@ oneStepSimilarity <- function(folder, date.from,date.to, threshold, method){
   return(res)
 }
 
-fs1 <- readRDS("C:/Dmitry/projects/postdoc/TRC2020/fs/64/RF/4032/3/2017-08-13_000000.rds")
-fs2 <- readRDS("C:/Dmitry/projects/postdoc/TRC2020/fs/64/RF/20160/3/2017-10-08_000000.rds")
-cor(as.vector(fs1),as.vector(fs2))
-fsMTS::fsSimilarity(fs1,fs2, cutoff=T, threshold=0.5, method = "Kuncheva")
-
-folder<-file.path("C:/tmp/32","CCF",144,3)
+folder<-file.path("C:/tmp/fs/64","MIloc","36/3/0.3")
 fmt <- "%Y-%m-%d_%H%M%S"
 date.from <- as.POSIXct("2017-07-31_000000",format=fmt)
 date.to <- as.POSIXct("2017-10-07_000000",format=fmt)
 
 sim.tibble<-NULL
-for (th in c(0.99)){
-  for (method in c("Jaccard", "Kuncheva")){
+for (th in seq(0,1,by=0.1)){
+  for (method in c("Kuncheva")){
     print(paste("Estimating: threshold=",th,", method=", method))
     r<-oneStepSimilarity(folder, date.from,date.to, threshold=th, method=method)
     sim.tibble<- bind_rows(sim.tibble, r)
@@ -112,10 +155,11 @@ for (th in c(0.99)){
 }
 
 res<-sim.tibble%>%mutate(dow_time=format(datetime,"%w %H:%M"))
+saveRDS(res, file.path(dir,"GLASSOloc_oneStepSimilarity.rds"))
 
-res%>%filter(method=="Kuncheva")%>%mutate(key=paste(key, threshold))%>%group_by(key,dow_time)%>%summarise(mean.similarity=mean(similarity))%>%ggplot(aes(x = dow_time, y=mean.similarity, group=key, col=key))+geom_line()
+res%>%filter(method=="Kuncheva", threshold>0)%>%mutate(key=paste(key, threshold))%>%group_by(key,dow_time)%>%summarise(mean.similarity=mean(similarity))%>%ggplot(aes(x = dow_time, y=mean.similarity, group=key, col=key))+geom_line()
 
-stat<-res%>%group_by(method,key,threshold)%>%summarise(mean.similarity=mean(similarity))
+stat<-res%>%filter(threshold>0)%>%group_by(method,key,threshold)%>%summarise(mean.similarity=mean(similarity))
 stat%>%ungroup%>%mutate(key=paste(key, method))%>%group_by(key)%>%ggplot(aes(x = threshold, y=mean.similarity, group=key, col=key))+geom_line()
 ```
 ```{r}
