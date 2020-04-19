@@ -165,12 +165,12 @@ data.scaled<-cbind(sampl$data[,1],scale(sampl$data[,-1]))
 estimateFeatures(fs.function=fsMTS::fsMTS, 
                  data = sampl$data, 
                  seriesNames = series,
-                 trainingWindowSize = 4032,#nrow(sampl$data),#12*24*0.5,
+                 trainingWindowSize = nrow(sampl$data),#12*24*0.5,
                  forecastEvery = 1,
                  max.lag = 3,
-                 fs.folder = file.path(dir,"fs",length(series),"MIloc"),
+                 fs.folder = file.path(dir,"fs",length(series),"distance"),
                  req.packages = c("fsMTS"),
-                 method="MI",
+                 method="distance",
                  rho=0.3,
                  shortest = shortestA,
                  step = ta,
@@ -188,15 +188,14 @@ estimateFeaturesGlobal(fs.function=fsMTS::fsMTS,
                  forecastEvery = 1,
                  max.lag = 3,
                  ta=ta,
-                 fs.folder = file.path(dir,"fs",length(series),"MIg"),
+                 fs.folder = file.path(dir,"fs",length(series),"LARSg"),
                  req.packages = c("fsMTS","lubridate","tibble","tidyverse"),
-                 method="MI",
+                 method="LARS",
                  rho=0.3,
                  shortest = shortestA,
                  req.functions=c("daySec"),
                  step = ta,
-                 localized = F,
-                 clusterNumber = 1
+                 localized = F
                  )
 
 
@@ -292,28 +291,30 @@ RunModels(sampl$data, series, ta, forecastingSteps, forecastEvery,
 ```
 
 ```{r analyse_results}
-params <- c('trainingMinutes','allowdrift','stationary','arLags','include.mean','fs.folder','threshold','ownlags')
+params <- c('trainingMinutes','arLags','include.mean','fs.folder','threshold','ownlags')
 
 results <- readRDS(results.file)
-results<-results%>%mutate(fs.folder=gsub(file.path(dir,"fs"),"",fs.folder))
-models.estimated <- readRDS(models.estimated.file)
+results <- readRDS("c:/tmp/baseline.results.rds")
+#results<-results%>%mutate(fs.folder=gsub(file.path(dir,"fs"),"",fs.folder))
+#models.estimated <- readRDS(models.estimated.file)
 summary(results$actual)
 #results<-results%>%filter(abs(actual)>100)
 results%>%select(datetime,detector,actual,forecasted)
-actu<-mysample$data.orig%>%gather(key="detector", value="actual.orig", -one_of("datetime"))%>%
-  mutate(detector=gsub(".volume","",detector))
-r<-results%>%left_join(actu, by=c("datetime"="datetime","detector"="detector"))
-r1<-r%>%mutate(actual=actual+actual.orig,forecasted=forecasted+actual.orig)
-mymape <- function(actual,pred){
-          d<-abs((actual - pred)/actual)
-          d[d==Inf]<-NA
-           mape <- mean(d, na.rm = T)*100
-           return (mape)
-         }
+# actu<-mysample$data.orig%>%gather(key="detector", value="actual.orig", -one_of("datetime"))%>%
+#   mutate(detector=gsub(".volume","",detector))
+# r<-results%>%left_join(actu, by=c("datetime"="datetime","detector"="detector"))
+# r1<-r%>%mutate(actual=actual+actual.orig,forecasted=forecasted+actual.orig)
+# mymape <- function(actual,pred){
+#           d<-abs((actual - pred)/actual)
+#           d[d==Inf]<-NA
+#            mape <- mean(d, na.rm = T)*100
+#            return (mape)
+#          }
 
-s<-cvSummary(r1, mymape, cumulative=F, params=params)%>%
+s<-cvSummary(results, mae, cumulative=F, params=params)%>%
     mutate(modelid=paste(model,trainingMinutes, arLags, include.mean,fs.folder,threshold,ownlags))%>%
     mutate(modelid=gsub(" NA","",modelid))
+s%>%print(n=36)
 #saveRDS(s, summary.file)
 
 options(pillar.sigfig = 4)
@@ -322,21 +323,34 @@ s%>%
     group_by(modelid)%>%filter(MYMAPE==min(MYMAPE))%>%ungroup%>%select(-c('allowdrift','stationary','include.mean'))%>%print(n=50)
 
 
-(winners3 <- s%>%
-    filter(forecast_horizon==3)%>%
-    group_by(model)%>%filter(MAE==min(MAE))%>%ungroup%>%select(-c('allowdrift','stationary','include.mean')))
+pres<-results%>%filter(model=="STAR ",forecast_horizon==12)%>%mutate(dow_time=format(last_date,"%w %H:%M"))
+
+p1<-pres%>%group_by(dow_time)%>%summarise(mean.mae=mae(actual,forecasted))%>%arrange(dow_time)
+p1%>%ggplot(aes(x = dow_time, y=mean.mae, group = 1)) + geom_line()
+
+p2<-pres%>%group_by(detector)%>%summarise(mean.mae=mae(actual,forecasted))%>%arrange(detector)
+p2%>%ggplot(aes(x = detector, y=mean.mae, group = 1)) + geom_line()
+
+summary(p2)
+
+tmp<-p1
+tmp$model<-"CCF"
+p1$model<-"VAR"
+t<-bind_rows(tmp, p1)
+t%>%ggplot(aes(x = dow_time, y=mean.mae, group = model, col=model)) + geom_line()
+t%>%group_by(model)%>%summarise(mean.mae = mean(mean.mae))
 
 
  results.cum <-results%>%
-    mutate(modelid=gsub(" NA","",paste(model,trainingMinutes, arLags, ccfThreshold,
-                         include.mean,stationary,allowdrift,radius1,radius2,include_ratio, spatial_step,modelsp,decay)))%>%
+    mutate(modelid=gsub(" NA","",paste(model,trainingMinutes, arLags, 
+                         include.mean)))%>%
     group_by(model_hash,detector)%>%
     arrange(model_hash,detector,forecast_horizon)%>%
     mutate(cumactual=cumsum(actual),cumforecasted=cumsum(forecasted))
 
 #tmodels<-c("autoarima 7200 FALSE FALSE FALSE","SpatialARIMAX 7200 FALSE FALSE FALSE 10 30 FALSE 5",           "SpatialSVR 7200 10 30 FALSE 5 svm","STAR ccf 7200 6 0.1 FALSE")
  tmodels<-c("autoarima 7200 FALSE FALSE FALSE","SpatialARIMAX 7200 FALSE FALSE FALSE 10 30 FALSE 5",           "SpatialSVR 7200 10 30 FALSE 5 svm")
-results.cum.filtered<-results.cum%>%filter(forecast_horizon==3,modelid %in% tmodels)%>% mutate(modelid=ifelse(str_detect(modelid,"^STAR ccf"),"SpVAR-cc",modelid))%>% mutate(modelid=ifelse(str_detect(modelid,"^SpatialARIMAX"),"SpX-ARIMAX",modelid))%>% mutate(modelid=ifelse(str_detect(modelid,"^SpatialSVR"),"SpX-SVR",modelid))%>% mutate(modelid=ifelse(str_detect(modelid,"^autoarima"),"ARIMA",modelid))
+results.cum.filtered<-results.cum%>%filter(forecast_horizon==3)
  
 gtmp1<-results.cum.filtered%>%mutate(last_date_d = format(datetime, format="%H:%M",tz="GMT"))
 
