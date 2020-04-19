@@ -17,3 +17,9 @@ add_results <- function(tib,result,modelName,trainingSize, ta,forecastingSteps,.
 shift <- function(x, n){
   c(x[-(seq(n))], rep(NA, n))
 }
+mymape <- function(actual,pred){
+  d<-abs((actual - pred)/actual)
+  d[d==Inf]<-NA
+  mape <- mean(d, na.rm = T)*100
+  return (mape)
+}

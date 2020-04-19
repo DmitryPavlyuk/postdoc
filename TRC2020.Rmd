@@ -241,10 +241,10 @@ RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
     params<-c(base_params,list(trainingWindowSize=trainingSize))
     
     if (length(forecastingSteps)>1) params$forecastingSteps=max(forecastingSteps)
-    estimate.HA(params,cv,results.file, models.estimated.file)
-    estimate.arima(params,cv,results.file, models.estimated.file)
-    estimate.SpVAR(params,cv,results.file, models.estimated.file)
-    #estimate.SpVARcc(params,cv,results.file, models.estimated.file)
+    #estimate.HA(params,cv,results.file, models.estimated.file)
+    #estimate.naive(params,cv,results.file, models.estimated.file)
+    #estimate.arima(params,cv,results.file, models.estimated.file)
+    estimate.SpVAR(params,cv,dir)
     print(Sys.time() - start.time)
   }
 }
@@ -254,14 +254,13 @@ RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
 dat<-as.data.frame(sampl$data)
 rownames(dat)<-format(dat$datetime,"%Y-%m-%d %H:%M:%S")
 
-fs.dir<-file.path(dir,"fs",length(series))
 source(file.path("R","models_spvar.R"))
-xModel.star$run(dat[1:1440,series], forecastingSteps=3, arLags=3, 
-                fs.folder=file.path(dir,"fs",length(series),"CCFg",12,3), 
+xModel.star$run(dat[1:1440,series], forecastingSteps=3, arLags=3,
+                fs.folder=CCF.global,
                 control=list(),
-                returnModel=F, 
-                refine = F, 
-                include.mean=F, 
+                returnModel=F,
+                refine = F,
+                include.mean=F,
                 verbose=T,
                 exclude.series=NULL,
                 threshold=0.1)
@@ -271,18 +270,44 @@ validationEnd <- nrow(sampl$data)
 forecastEvery<-1
 forecastingSteps<-12
 
+
+maxlag<-3
+CCF.folder <- file.path(dir,"fs",length(series),"CCF",36,maxlag)
+MI.folder <- file.path(dir,"fs",length(series),"MI",36,maxlag)
+GLASSO.folder <- file.path(dir,"fs",length(series),"GLASSOloc",36,maxlag,0.3)
+LARS.folder <- file.path(dir,"fs",length(series),"LARS",36,maxlag)
+RF.folder <- file.path(dir,"fs",length(series),"RF",36,maxlag)
+
+CCFg.folder <- file.path(dir,"fs",length(series),"CCFg",36,maxlag)
+MIg.folder <- file.path(dir,"fs",length(series),"MIg",36,maxlag)
+GLASSOg.folder <- file.path(dir,"fs",length(series),"GLASSOlocg",36,maxlag,0.3)
+LARSg.folder <- file.path(dir,"fs",length(series),"LARSg",36,maxlag)
+RFg.folder <- file.path(dir,"fs",length(series),"RFg",36,maxlag)
+
+distance.folder <- file.path(dir,"fs",length(series),"distance",288,maxlag)
+CCF.global <- file.path(dir,"fs",length(series),"CCF",20160,maxlag,"2017-10-08_000000.rds")
+GLASSO.global <- file.path(dir,"fs",length(series),"GLASSOloc",20160,maxlag,0.3,"2017-10-08_000000.rds")
+MI.global <- file.path(dir,"fs",length(series),"MI",4032,maxlag,"2017-08-13_000000.rds")
+LARS.global <- file.path(dir,"fs",length(series),"LARS",20160,maxlag,"2017-10-08_000000.rds")
+RF.global <- file.path(dir,"fs",length(series),"RF",20160,maxlag,"2017-10-08_000000.rds")
+
+
 # Define a grid for tuning parameters
 cvgrid <- expand.grid(trainingMinutes = c(12*60*14),
                       include.mean = c(F),
-                      arLags = c(3),
+                      arLags = c(maxlag),
                       stationary =  c(T),
                       allowdrift =  c(F),
-                      fs.folder=c(NA),
+                      fs.folder=c(distance.folder,
+                                  CCF.global,
+                                  GLASSO.global,
+                                  MI.global,
+                                  LARS.global,
+                                  RF.global),
                       threshold=c(0.2),
                       ownlags=c(T))
 source(file.path("R","models_spvar.R"))
 source(file.path("R","cv_functions.R"))
-
 # Run all models
 RunModels(sampl$data, series, ta, forecastingSteps, forecastEvery,
                       validationSize, validationEnd, 
@@ -293,33 +318,33 @@ RunModels(sampl$data, series, ta, forecastingSteps, forecastEvery,
 
 ```{r analyse_results}
 params <- c('trainingMinutes','allowdrift','stationary','arLags','include.mean','fs.folder','threshold','ownlags')
+#params <- c('trainingMinutes','allowdrift','stationary','arLags','include.mean','fs.folder','threshold','ownlags')
+
+results <- readRDS(file.path(dir,"baseline.results.rds"))
+models.estimated <- readRDS(file.path(dir,"baseline.models.rds"))
 
 results <- readRDS(results.file)
-results<-results%>%mutate(fs.folder=gsub(file.path(dir,"fs"),"",fs.folder))
 models.estimated <- readRDS(models.estimated.file)
+
+results<-results%>%mutate(fs.folder=gsub(file.path(dir,"fs",64),"",fs.folder))
 summary(results$actual)
 #results<-results%>%filter(abs(actual)>100)
-results%>%select(datetime,detector,actual,forecasted)
+#results%>%select(datetime,detector,actual,forecasted)
 actu<-mysample$data.orig%>%gather(key="detector", value="actual.orig", -one_of("datetime"))%>%
   mutate(detector=gsub(".volume","",detector))
 r<-results%>%left_join(actu, by=c("datetime"="datetime","detector"="detector"))
 r1<-r%>%mutate(actual=actual+actual.orig,forecasted=forecasted+actual.orig)
-mymape <- function(actual,pred){
-          d<-abs((actual - pred)/actual)
-          d[d==Inf]<-NA
-           mape <- mean(d, na.rm = T)*100
-           return (mape)
-         }
 
-s<-cvSummary(r1, mymape, cumulative=F, params=params)%>%
+r1<-results
+
+s<-cvSummary(r1, mae, cumulative=F, params=params)%>%
     mutate(modelid=paste(model,trainingMinutes, arLags, include.mean,fs.folder,threshold,ownlags))%>%
     mutate(modelid=gsub(" NA","",modelid))
 #saveRDS(s, summary.file)
 
 options(pillar.sigfig = 4)
 s%>%
-    filter(forecast_horizon==3)%>%
-    group_by(modelid)%>%filter(MYMAPE==min(MYMAPE))%>%ungroup%>%select(-c('allowdrift','stationary','include.mean'))%>%print(n=50)
+    group_by(modelid,forecast_horizon)%>%filter(MAE==min(MAE))%>%ungroup%>%select(-c('allowdrift','stationary','include.mean'))%>%print(n=50)
 
 
 (winners3 <- s%>%

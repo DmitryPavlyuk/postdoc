@@ -7,13 +7,18 @@ starForecast <-function(sampl, forecastingSteps, arLags,threshold, fs.folder=NA,
   complete <- is.na(fs.folder)
   fixed <- NULL
   if (!complete){
-    filename <-gsub(" ","_", last_date)
-    filename <-paste0(gsub(":","", filename),".rds")
-    filename <- file.path(fs.folder, filename)
-    if (!file.exists(filename)){
-      ds <- daySec(as.POSIXct(last_date, format="%Y-%m-%d %H:%M:%S"))
-      filename <- file.path(fs.folder, paste0(ds,".rds"))
-    } 
+    fs.folder<-as.character(fs.folder)
+    if (file.exists(fs.folder) && !dir.exists(fs.folder)){
+      filename<-fs.folder
+    }else{
+      filename <-gsub(" ","_", last_date)
+      filename <-paste0(gsub(":","", filename),".rds")
+      filename <- file.path(fs.folder, filename)
+      if (!file.exists(filename)){
+        ds <- daySec(as.POSIXct(last_date, format="%Y-%m-%d %H:%M:%S"))
+        filename <- file.path(fs.folder, paste0(wd(last_date),"_",ds,".rds"))
+      } 
+    }
     if (!file.exists(filename)) stop(paste("No feature set found: ",filename))
     print(paste("Using ",filename))
     fixed <- readRDS(filename)
@@ -105,7 +110,7 @@ xModel.bigVAR <- list(
 )
 
 
-estimate.SpVAR<-function(params, cv, results.file, models.estimated.file){
+estimate.SpVAR<-function(params, cv, results.folder){
   complete<-is.null(cv$fs.folder)
 modelid <- paste(suf(xModel.star,cv$fs.folder)$name,cv$trainingMinutes,
                  cv$arLags,cv$include.mean,ifelse(complete,"",cv$threshold),ifelse(complete,"",cv$ownlags),collapse = '')
@@ -113,8 +118,10 @@ if (!is.null(cv$exclude.s)) modelid<-paste(modelid,cv$exclude.s,collapse = '')
 models.estimated <- readRDS(models.estimated.file)
 es <- NA
 if (!is.null(cv$exclude.s)) es<-strsplit(as.character(cv$exclude.s),":")[[1]]
-if (!(modelid %in% models.estimated)){
-  results <- readRDS(results.file)
+filename<-paste0(gsub("[.]","_",gsub(" ","_",gsub("/","_",modelid))),".rds")
+print(filename)
+if (!file.exists(filename)){
+  results <- tibble()
   print(paste("Estimating model",modelid))
   res<-do.call(rollingWindow,
                c(params,list(xModel=suf(xModel.star,cv$folder),
@@ -130,9 +137,9 @@ if (!(modelid %in% models.estimated)){
                                           fs.folder = cv$fs.folder,
                                           threshold=ifelse(complete,NA,cv$threshold),
                                           ownlags=ifelse(complete,NA,cv$ownlags)))
-  models.estimated<-c(models.estimated,modelid)
-  saveRDS(results, results.file)
-  saveRDS(models.estimated, models.estimated.file)
+  print(paste("Saving",filename))
+  saveRDS(results, filename)
+  #saveRDS(models.estimated, models.estimated.file)
 }else{
   print(paste("Model",modelid,"already estimated; skipped"))
 }

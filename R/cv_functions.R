@@ -29,6 +29,7 @@ rollingWindow <- function(data, seriesNames,xModel, trainingWindowSize,
   if (clusterNumber>1) stopCluster(cl)
   count <- 1
   result <- tibble()
+  rlist<- list()
   for (i in seqVals){
     if (length(forecastingSteps)>1){
       act<-(i+trainingWindowSize-1+forecastingSteps)
@@ -50,9 +51,12 @@ rollingWindow <- function(data, seriesNames,xModel, trainingWindowSize,
     f$model_hash<-hash
     x<-bind_rows(actual,f) %>% gather(key="detector", value="value", series)%>%spread(key=v, value=value)
     
-    result<-bind_rows(result,x)
+    #result<-bind_rows(result,x)
+    rlist[[count]]<-x
     count <- count+1
+    if (count %% 100 == 0) print(paste("Handling",count))
   }
+  result <- bind_rows(rlist)
   return(result%>%mutate(model=xModel$name))
 }
 
