@@ -1,4 +1,4 @@
-naiveForecast <-function(sampl, forecastingSteps, verbose=F){
+naiveForecast <-function(sampl, forecastingSteps, verbose=T){
   if (verbose) print(paste("Naive; training sample: ",rownames(sampl)[1],"-",rownames(sampl)[nrow(sampl)]))
   forecast <- as.numeric(sampl[nrow(sampl),])
   res <- matrix(rep(forecast,each=forecastingSteps),nrow=forecastingSteps)
@@ -97,6 +97,23 @@ estimate.HA<-function(params, cv, results.file, models.estimated.file){
   }
 }
 
+estimate.naive<-function(params, cv, results.file, models.estimated.file){
+  modelid <- paste(xModel.naive$name,collapse = '')
+  models.estimated <- readRDS(models.estimated.file)
+  if (!(modelid %in% models.estimated)){
+    results <- readRDS(results.file)
+    print(paste("Estimating model",modelid))
+    res<-do.call(rollingWindow,
+                 c(params,list(xModel=xModel.naive)),
+                 envir=environment())
+    results<-bind_rows(results,res)
+    models.estimated<-c(models.estimated,modelid)
+    saveRDS(results, results.file)
+    saveRDS(models.estimated, models.estimated.file)
+  }else{
+    print(paste("Model",modelid,"already estimated; skipped"))
+  }
+}
 
 estimate.arima<-function(params, cv, results.file, models.estimated.file){
   
