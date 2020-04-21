@@ -23,3 +23,10 @@ mymape <- function(actual,pred){
   mape <- mean(d, na.rm = T)*100
   return (mape)
 }
+
+shift.mts<-function(mts,lag){
+  m<-matrix(rep(NA,lag*ncol(mts)),lag,ncol(mts))
+  colnames(m)<-colnames(mts)
+  rownames(m)<-rownames(mts[(nrow(mts)-lag+1):nrow(mts),])
+  return(bind_rows(as.data.frame(m),mts[-c((nrow(mts)-lag+1):nrow(mts)),]))
+}

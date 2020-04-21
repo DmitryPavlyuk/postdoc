@@ -124,6 +124,7 @@ estimateFeaturesGlobal <- function(fs.function, data, seriesNames,trainingWindow
                     from<-daySec(data[i,]$datetime)
                     wd <- wday(data[i,]$datetime-from)
                     rto<-daySec(data[(i+trainingWindowSize-1),]$datetime)
+                    wdto<-wday(data[(i+trainingWindowSize-1),]$datetime)
                     print(paste(data[i,]$datetime," - ",data[(i+trainingWindowSize-1),]$datetime))
                     to<-rto + max.lag*ta*60
                     dif<-ifelse(to>from,to-from,to+3600*24-from)
@@ -133,7 +134,7 @@ estimateFeaturesGlobal <- function(fs.function, data, seriesNames,trainingWindow
                     dat[dat$h>dif2,-1]<-NA
                     mts <- as.matrix(dat%>%select(-one_of("datetime","h")))
                     print(paste("Observations:",nrow(dat)))
-                    filename<-paste0(wd,"_",rto,".rds")
+                    filename<-paste0(wdto,"_",rto,".rds")
                     filename <-gsub(" ","_", filename)
                     filename <-gsub(":","", filename)
                     filename <- file.path(folder,filename)
