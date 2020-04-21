@@ -36,6 +36,10 @@ needs(stringr)
 needs(e1071 )
 needs(randomForest )
 needs(Boruta)
+needs(matrixStats)
+needs(fsMTS)
+needs(plot.matrix)
+needs(lubridate)
 
 source(file.path("R","prepare_data_functions.R"))
 source(file.path("R","cv_functions.R"))
@@ -156,10 +160,7 @@ comp<-components(g, mode = "weak")
 
 
 ```{r fs}
-install.packages("fsMTS", repos="http://R-Forge.R-project.org")
-needs(fsMTS)
-needs(plot.matrix)
-needs(lubridate)
+
 source(file.path("R","cv_functions.R"))
 data.scaled<-cbind(sampl$data[,1],scale(sampl$data[,-1]))
 estimateFeatures(fs.function=fsMTS::fsMTS, 
@@ -245,6 +246,7 @@ RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
     #estimate.naive(params,cv,results.file, models.estimated.file)
     #estimate.arima(params,cv,results.file, models.estimated.file)
     estimate.SpVAR(params,cv,dir)
+    #estimate.KNN(params,cv,dir)
     print(Sys.time() - start.time)
   }
 }
@@ -254,20 +256,20 @@ RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
 dat<-as.data.frame(sampl$data)
 rownames(dat)<-format(dat$datetime,"%Y-%m-%d %H:%M:%S")
 
-source(file.path("R","models_spvar.R"))
-xModel.star$run(dat[1:1440,series], forecastingSteps=3, arLags=3,
-                fs.folder=CCF.global,
-                control=list(),
-                returnModel=F,
-                refine = F,
-                include.mean=F,
-                verbose=T,
-                exclude.series=NULL,
-                threshold=0.1)
+# source(file.path("R","models_spvar.R"))
+# xModel.star$run(dat[1:1440,series], forecastingSteps=3, arLags=3,
+#                 fs.folder=RFg.folder,
+#                 control=list(),
+#                 returnModel=F,
+#                 refine = F,
+#                 include.mean=F,
+#                 verbose=T,
+#                 exclude.series=NULL,
+#                 threshold=0.1)
 
-validationSize <- nrow(sampl$data)-12*60*14/ta
+validationSize <- nrow(sampl$data)-24*60*3/ta
 validationEnd <- nrow(sampl$data)
-forecastEvery<-1
+forecastEvery<-36
 forecastingSteps<-12
 
 
@@ -283,29 +285,31 @@ MIg.folder <- file.path(dir,"fs",length(series),"MIg",36,maxlag)
 GLASSOg.folder <- file.path(dir,"fs",length(series),"GLASSOlocg",36,maxlag,0.3)
 LARSg.folder <- file.path(dir,"fs",length(series),"LARSg",36,maxlag)
 RFg.folder <- file.path(dir,"fs",length(series),"RFg",36,maxlag)
+EnsVotingg.folder <- file.path(dir,"fs",length(series),"EnsVotingg",36,maxlag,0.2)
+EnsRankingg.folder <- file.path(dir,"fs",length(series),"EnsRankingg",36,maxlag,0.2)
 
-distance.folder <- file.path(dir,"fs",length(series),"distance",288,maxlag)
+distance.folder <- file.path(dir,"fs",length(series),"distance",20160,maxlag,"2017-10-08_000000.rds")
 CCF.global <- file.path(dir,"fs",length(series),"CCF",20160,maxlag,"2017-10-08_000000.rds")
 GLASSO.global <- file.path(dir,"fs",length(series),"GLASSOloc",20160,maxlag,0.3,"2017-10-08_000000.rds")
 MI.global <- file.path(dir,"fs",length(series),"MI",4032,maxlag,"2017-08-13_000000.rds")
 LARS.global <- file.path(dir,"fs",length(series),"LARS",20160,maxlag,"2017-10-08_000000.rds")
 RF.global <- file.path(dir,"fs",length(series),"RF",20160,maxlag,"2017-10-08_000000.rds")
+EnsVoting.global <- file.path(dir,"fs",length(series),"EnsVoting",20160,maxlag,0.2,"2017-10-08_000000.rds")
+EnsRanking.global <- file.path(dir,"fs",length(series),"EnsRanking",20160,maxlag,0.2,"2017-10-08_000000.rds")
 
 
 # Define a grid for tuning parameters
-cvgrid <- expand.grid(trainingMinutes = c(12*60*14),
+cvgrid <- expand.grid(trainingMinutes = c(24*60*3),
                       include.mean = c(F),
                       arLags = c(maxlag),
                       stationary =  c(T),
                       allowdrift =  c(F),
-                      fs.folder=c(distance.folder,
-                                  CCF.global,
-                                  GLASSO.global,
-                                  MI.global,
-                                  LARS.global,
-                                  RF.global),
-                      threshold=c(0.2),
-                      ownlags=c(T))
+                      fs.folder=c(CCF.global,
+                                  EnsVoting.global,
+                                  EnsRanking.global),
+                      threshold=c(0.1),
+                      ownlags=c(F),
+                      kneighbours=c(36))
 source(file.path("R","models_spvar.R"))
 source(file.path("R","cv_functions.R"))
 # Run all models
@@ -316,36 +320,71 @@ RunModels(sampl$data, series, ta, forecastingSteps, forecastEvery,
  
 ```
 
+```{r knn}
+needs(FNN)
+
+
+mts<-dat[1:10,series[1:3]]
+
+max.lag<-3
+
+source(file.path("R","cv_functions.R"))
+source(file.path("R","cv_utils.R"))
+source(file.path("R","models_spvar.R"))
+
+(knnForecast(dat[1:10080,series],12,3,0.1,fs.folder=EnsVoting.global,ownlags=F,control=list(kneighbours=36)))
+
+```
+
+
 ```{r analyse_results}
-params <- c('trainingMinutes','allowdrift','stationary','arLags','include.mean','fs.folder','threshold','ownlags')
 #params <- c('trainingMinutes','allowdrift','stationary','arLags','include.mean','fs.folder','threshold','ownlags')
 
-results <- readRDS(file.path(dir,"baseline.results.rds"))
-models.estimated <- readRDS(file.path(dir,"baseline.models.rds"))
+# models.estimated <- readRDS(file.path(dir,"baseline.models.rds"))
+# 
+# results <- readRDS(results.file)
+# models.estimated <- readRDS(models.estimated.file)
+# 
+# results<-results%>%mutate(fs.folder=gsub(file.path(dir,"fs",64),"",fs.folder))
+# summary(results$actual)
+# #results<-results%>%filter(abs(actual)>100)
+# #results%>%select(datetime,detector,actual,forecasted)
+# actu<-mysample$data.orig%>%gather(key="detector", value="actual.orig", -one_of("datetime"))%>%
+#   mutate(detector=gsub(".volume","",detector))
+# r<-results%>%left_join(actu, by=c("datetime"="datetime","detector"="detector"))
+# r1<-r%>%mutate(actual=actual+actual.orig,forecasted=forecasted+actual.orig)
+# 
+# r1<-results
 
-results <- readRDS(results.file)
-models.estimated <- readRDS(models.estimated.file)
-
-results<-results%>%mutate(fs.folder=gsub(file.path(dir,"fs",64),"",fs.folder))
-summary(results$actual)
-#results<-results%>%filter(abs(actual)>100)
-#results%>%select(datetime,detector,actual,forecasted)
-actu<-mysample$data.orig%>%gather(key="detector", value="actual.orig", -one_of("datetime"))%>%
-  mutate(detector=gsub(".volume","",detector))
-r<-results%>%left_join(actu, by=c("datetime"="datetime","detector"="detector"))
-r1<-r%>%mutate(actual=actual+actual.orig,forecasted=forecasted+actual.orig)
-
-r1<-results
-
-s<-cvSummary(r1, mae, cumulative=F, params=params)%>%
-    mutate(modelid=paste(model,trainingMinutes, arLags, include.mean,fs.folder,threshold,ownlags))%>%
-    mutate(modelid=gsub(" NA","",modelid))
-#saveRDS(s, summary.file)
+reslist<-list()
+for (f in list.files("thres")){
+  reslist[[length(reslist)+1]]<-readRDS(file.path("thres", f))
+}
+results<-bind_rows(reslist)
 
 options(pillar.sigfig = 4)
+#results <- readRDS("KNN_TRC2020_fs_64_CCF_20160_3_2017-10-08_000000_rds_10080_3_36_0_1_TRUE.rds")
+#r1<-results%>%filter(daySec(datetime)>7*60*60,daySec(datetime)<10*60*60)
+# params <- c('trainingMinutes','arLags','include.mean','fs.folder','threshold','ownlags')
+# s<-cvSummary(results, mae, cumulative=F, params=params)%>%
+#     mutate(modelid=paste(model,trainingMinutes, arLags, include.mean,fs.folder,threshold,ownlags))%>%
+#     mutate(modelid=gsub(" NA","",modelid))
+params <- c('trainingMinutes','arLags','fs.folder','threshold','ownlags','kneighbours')
+s<-cvSummary(results, mae, cumulative=F, params=params)%>%
+    mutate(modelid=paste(model,trainingMinutes, arLags,fs.folder,threshold,ownlags,kneighbours))%>%
+    mutate(modelid=gsub(" NA","",modelid))
+
+
+s%>%filter(forecast_horizon<13)%>%ungroup%>%mutate(key=paste(model,trainingMinutes,fs.folder))%>%select(key,threshold,forecast_horizon,MAE)%>%filter(forecast_horizon==3)%>%
+  spread(key=threshold, value=MAE)
+
+#saveRDS(s, summary.file)
+
 s%>%
     group_by(modelid,forecast_horizon)%>%filter(MAE==min(MAE))%>%ungroup%>%select(-c('allowdrift','stationary','include.mean'))%>%print(n=50)
 
+pres<-results%>%filter(forecast_horizon==12)%>%mutate(last_date_d = format(datetime, format="%w %H:%M",tz="GMT"))%>%group_by(model,last_date_d)%>%summarise(mean.mae=mae(actual, forecasted))%>%arrange(last_date_d)
+pres%>%ggplot(aes(x = last_date_d, y=mean.mae, group=1)) +geom_line()
 
 (winners3 <- s%>%
     filter(forecast_horizon==3)%>%

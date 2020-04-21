@@ -16,7 +16,7 @@ starForecast <-function(sampl, forecastingSteps, arLags,threshold, fs.folder=NA,
       filename <- file.path(fs.folder, filename)
       if (!file.exists(filename)){
         ds <- daySec(as.POSIXct(last_date, format="%Y-%m-%d %H:%M:%S"))
-        filename <- file.path(fs.folder, paste0(wd(last_date),"_",ds,".rds"))
+        filename <- file.path(fs.folder, paste0(wday(last_date),"_",ds,".rds"))
       } 
     }
     if (!file.exists(filename)) stop(paste("No feature set found: ",filename))
@@ -25,6 +25,11 @@ starForecast <-function(sampl, forecastingSteps, arLags,threshold, fs.folder=NA,
     fixed<-fsMTS::cutoff(fixed, threshold)
     if (ownlags) {
       fixed <-fixed+fsMTS::fsMTS(as.matrix(sampl),arLags,method="ownlags")
+      fixed[fixed>0]<-1
+    }else{
+      m<-matrix(0,arLags*ncol(sampl), ncol(sampl))
+      diag(m)<-1
+      fixed <-fixed+m
       fixed[fixed>0]<-1
     }
     print(paste(filename,"Number of links",sum(fixed>0)))
@@ -63,6 +68,84 @@ xModel.star <- list(
   functions = c('randomStr',"shift", "daySec"),
   packages = c('tidyverse','matrixStats','tseries','MTS','tibble', 'fsMTS','lubridate')
 )
+
+
+knnForecast <-function(mts, forecastingSteps, arLags,threshold, fs.folder=NA,control=list(),ownlags=T){
+  print(paste("KNN",fs.folder," training sample: ",rownames(mts)[1],"-",rownames(mts)[nrow(mts)]))
+  complete <- is.na(fs.folder)
+  last_date <- rownames(mts)[nrow(mts)]
+  if (!complete){
+    fs.folder<-as.character(fs.folder)
+    if (file.exists(fs.folder) && !dir.exists(fs.folder)){
+      filename<-fs.folder
+    }else{
+      filename <-gsub(" ","_", last_date)
+      filename <-paste0(gsub(":","", filename),".rds")
+      filename <- file.path(fs.folder, filename)
+      if (!file.exists(filename)){
+        ds <- daySec(as.POSIXct(last_date, format="%Y-%m-%d %H:%M:%S"))
+        filename <- file.path(fs.folder, paste0(wday(last_date),"_",ds,".rds"))
+      } 
+    }
+    if (!file.exists(filename)) stop(paste("No feature set found: ",filename))
+    print(paste("Using ",filename))
+    fixed <- readRDS(filename)
+    fixed<-fsMTS::cutoff(fixed, threshold)
+    if (ownlags) {
+      fixed <-fixed+fsMTS::fsMTS(as.matrix(mts),arLags,method="ownlags")
+      fixed[fixed>0]<-1
+    }else{
+        m<-matrix(0,arLags*ncol(mts), ncol(mts))
+        diag(m)<-1
+        fixed <-fixed+m
+        fixed[fixed>0]<-1
+    }
+    print(paste(filename,"Number of links",sum(fixed>0)))
+  }else{
+    print("No feature sets - estimating complete KNN")
+  }
+  
+  mts.ext<-mts
+  for (l in 1:arLags){
+    sh<-shift.mts(mts, l)
+    colnames(sh)<-paste0(colnames(mts),".l",l)
+    mts.ext<-cbind(mts.ext,sh)
+  }
+  mts.ext<-mts.ext[complete.cases(mts.ext), ]
+  forecast<-NULL
+  k<-ifelse(is.numeric(control$kneighbours),control$kneighbours, 3)
+  for (f in 1:forecastingSteps){
+    train<-mts.ext[-((nrow(mts.ext)-f+1):nrow(mts.ext)),-seq(ncol(mts))]
+    test<-mts.ext[nrow(mts.ext)-f+1,-seq(ncol(mts))]
+    y.pred<-c()
+    for (i in 1:ncol(mts)){
+      if(!complete){
+        yname<-colnames(mts)[i]
+        fs<-fixed[,yname]
+        xnames<-names(fs[fs>0])
+        ytrain<-train[,xnames]
+        ytest<-test[,xnames]
+      }else{
+        ytrain<-train
+        ytest<-test
+      }
+      y<-mts.ext[-seq(f),i]
+      res<-knn.reg(train=ytrain,test=ytest, y=y, k=k)
+      y.pred<-c(y.pred,res$pred)
+    }
+    names(y.pred)<-colnames(mts)
+    forecast<-bind_rows(forecast,y.pred)
+  }
+  print(paste("Completed training sample: ",rownames(mts)[1],"-",rownames(mts)[nrow(mts)]))
+  return(forecast)
+}
+xModel.knn <- list(
+  name="KNN",
+  run = knnForecast,
+  functions = c('randomStr',"shift.mts", "daySec"),
+  packages = c('tidyverse','fsMTS','lubridate','FNN')
+)
+
 
 
 bigVARForecast <-function(sampl, forecastingSteps, arLags, struct="Basic", verbose=T){  
@@ -143,4 +226,37 @@ if (!file.exists(filename)){
 }else{
   print(paste("Model",modelid,"already estimated; skipped"))
 }
+}
+
+
+
+estimate.KNN<-function(params, cv, results.folder){
+  complete<-is.na(cv$fs.folder)
+  modelid <- paste(suf(xModel.knn,cv$fs.folder)$name,cv$trainingMinutes,
+                   cv$arLags,cv$kneighbours,ifelse(complete,"",cv$threshold),ifelse(complete,"",cv$ownlags),collapse = '')
+  models.estimated <- readRDS(models.estimated.file)
+  filename<-paste0(gsub("[.]","_",gsub(" ","_",gsub("/","_",modelid))),".rds")
+  print(filename)
+  if (!file.exists(filename)){
+    results <- tibble()
+    print(paste("Estimating model",modelid))
+    res<-do.call(rollingWindow,
+                 c(params,list(xModel=suf(xModel.knn,cv$folder),
+                               control=list(kneighbours=cv$kneighbours),
+                               fs.folder=cv$fs.folder,
+                               arLags=cv$arLags,
+                               threshold=cv$threshold,
+                               ownlags=cv$ownlags)),
+                 envir=environment())
+    results<-bind_rows(results,res%>%mutate(trainingMinutes=cv$trainingMinutes,arLags=cv$arLags,
+                                            fs.folder = cv$fs.folder,
+                                            kneighbours = cv$kneighbours,
+                                            threshold=ifelse(complete,NA,cv$threshold),
+                                            ownlags=ifelse(complete,NA,cv$ownlags)))
+    print(paste("Saving",filename))
+    saveRDS(results, filename)
+    #saveRDS(models.estimated, models.estimated.file)
+  }else{
+    print(paste("Model",modelid,"already estimated; skipped"))
+  }
 }

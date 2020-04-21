@@ -255,3 +255,73 @@ simils%>%select(datetime,CCF,CCFsmoothed,CCF.ma,CCFvsMean)%>%gather(key="key", v
 summary(simils)
 simils
 ```
+
+
+
+```{r create_ensemble}
+fs.distance.global <- readRDS(file.path(dir,"fs",length(series),"distance",20160,maxlag,"2017-10-08_000000.rds"))
+fs.CCF.global <- readRDS(file.path(dir,"fs",length(series),"CCF",20160,maxlag,"2017-10-08_000000.rds"))
+fs.GLASSO.global <- readRDS(file.path(dir,"fs",length(series),"GLASSOloc",20160,maxlag,0.3,"2017-10-08_000000.rds"))
+fs.MI.global <- readRDS(file.path(dir,"fs",length(series),"MI",4032,maxlag,"2017-08-13_000000.rds"))
+fs.LARS.global <- readRDS(file.path(dir,"fs",length(series),"LARS",20160,maxlag,"2017-10-08_000000.rds"))
+fs.RF.global <- readRDS(file.path(dir,"fs",length(series),"RF",20160,maxlag,"2017-10-08_000000.rds"))
+
+mlist <- list(Distance = fs.distance.global,
+              CCF = fs.CCF.global,
+              GLASSO = fs.GLASSO.global,
+              MI = fs.MI.global,
+              LARS = fs.LARS.global,
+              RF = fs.RF.global)
+
+th<-0.2
+plot(fs.CCF.global, col=rev(heat.colors(10)), key=NULL, main="FS")
+plot(cutoff(fs.CCF.global,th), col=rev(heat.colors(10)), key=NULL, main="FS")
+plot(cutoff(fs.LARS.global,th), col=rev(heat.colors(10)), key=NULL, main="FS")
+mlist[["EnsembleRank"]] <- fsMTS::fsEnsemble(mlist, threshold = th, method="ranking")
+mlist[["EnsembleMajV"]] <- fsMTS::fsEnsemble(mlist, threshold = th, method="majority")
+(msimilarity <- fsSimilarityMatrix(mlist,threshold = th, method="Hamming"))
+colnames(mlist[["EnsembleRank"]])<-colnames(mlist[["EnsembleMajV"]])
+rownames(mlist[["EnsembleRank"]])<-rownames(mlist[["EnsembleMajV"]])
+  
+plot(mlist[["EnsembleMajV"]], col=rev(heat.colors(10)), key=NULL, main="FS")
+val<-fsSimilarity(mlist[["EnsembleRank"]],mlist[["EnsembleMajV"]], method="Kuncheva")
+fsMTS::fsSparsity(mlist[["EnsembleRank"]])
+fsMTS::fsSparsity(mlist[["EnsembleMajV"]])
+dir.create(file.path(dir,"fs",length(series),"EnsRanking",20160,maxlag), recursive = T)
+saveRDS(mlist[["EnsembleMajV"]], file.path(dir,"fs",length(series),"EnsVoting",20160,maxlag,th,"2017-10-08_000000.rds"))
+saveRDS(mlist[["EnsembleRank"]], file.path(dir,"fs",length(series),"EnsRanking",20160,maxlag,th,"2017-10-08_000000.rds"))
+
+maxlag<-3
+CCFg.folder <- file.path(dir,"fs",length(series),"CCFg",36,maxlag)
+MIg.folder <- file.path(dir,"fs",length(series),"MIg",36,maxlag)
+GLASSOg.folder <- file.path(dir,"fs",length(series),"GLASSOlocg",36,maxlag,0.3)
+LARSg.folder <- file.path(dir,"fs",length(series),"LARSg",36,maxlag)
+RFg.folder <- file.path(dir,"fs",length(series),"RFg",36,maxlag)
+
+EnsVotingg.folder <- file.path(dir,"fs",length(series),"EnsVotingg",36,maxlag,th)
+dir.create(EnsVotingg.folder, recursive = T)
+EnsRankingg.folder <- file.path(dir,"fs",length(series),"EnsRankingg",36,maxlag,th)
+dir.create(EnsRankingg.folder, recursive = T)
+
+for (f in list.files(CCFg.folder)){
+  fs.CCF.daytime <- readRDS(file.path(CCFg.folder,f))
+  fs.GLASSO.daytime <- readRDS(file.path(GLASSOg.folder,f))
+  fs.MI.daytime <- readRDS(file.path(MIg.folder,f))
+  fs.LARS.daytime <- readRDS(file.path(LARSg.folder,f))
+  fs.RF.daytime <- readRDS(file.path(RFg.folder,f))
+  mlist <- list(Distance = fs.distance.global,
+              CCF = fs.CCF.daytime,
+              GLASSO = fs.GLASSO.daytime,
+              MI = fs.MI.daytime,
+              LARS = fs.LARS.daytime,
+              RF = fs.RF.daytime)
+  EnsembleRank <- fsMTS::fsEnsemble(mlist, threshold = th, method="ranking")
+  EnsembleMajV <- fsMTS::fsEnsemble(mlist, threshold = th, method="majority")
+  colnames(EnsembleRank)<-colnames(EnsembleMajV)
+  rownames(EnsembleRank)<-rownames(EnsembleMajV)
+  saveRDS(EnsembleMajV,file.path(EnsVotingg.folder,f))
+  saveRDS(EnsembleRank,file.path(EnsRankingg.folder,f))
+  print(paste(f,"Sparsity",fsMTS::fsSparsity(EnsembleMajV)))
+}
+
+```
