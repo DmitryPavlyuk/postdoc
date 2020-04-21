@@ -256,7 +256,7 @@ rownames(dat)<-format(dat$datetime,"%Y-%m-%d %H:%M:%S")
 
 source(file.path("R","models_spvar.R"))
 xModel.star$run(dat[1:1440,series], forecastingSteps=3, arLags=3,
-                fs.folder=CCF.global,
+                fs.folder=RF.folder,
                 control=list(),
                 returnModel=F,
                 refine = F,
@@ -298,12 +298,11 @@ cvgrid <- expand.grid(trainingMinutes = c(12*60*14),
                       arLags = c(maxlag),
                       stationary =  c(T),
                       allowdrift =  c(F),
-                      fs.folder=c(distance.folder,
-                                  CCF.global,
-                                  GLASSO.global,
-                                  MI.global,
-                                  LARS.global,
-                                  RF.global),
+                      fs.folder=c(CCF.folder,
+                                  MI.folder,
+                                  GLASSO.folder,
+                                  LARS.folder,
+                                  RF.folder),
                       threshold=c(0.2),
                       ownlags=c(T))
 source(file.path("R","models_spvar.R"))
@@ -317,10 +316,10 @@ RunModels(sampl$data, series, ta, forecastingSteps, forecastEvery,
 ```
 
 ```{r analyse_results}
-params <- c('trainingMinutes','allowdrift','stationary','arLags','include.mean','fs.folder','threshold','ownlags')
+params <- c('trainingMinutes','arLags','include.mean','fs.folder','threshold','ownlags')
 #params <- c('trainingMinutes','allowdrift','stationary','arLags','include.mean','fs.folder','threshold','ownlags')
 
-results <- readRDS(file.path(dir,"baseline.results.rds"))
+results <- readRDS(file.path("STAR_TRC2020_fs_64_RF_20160_3_2017-10-08_000000_rds_10080_3_FALSE_0_2_TRUE.rds"))
 models.estimated <- readRDS(file.path(dir,"baseline.models.rds"))
 
 results <- readRDS(results.file)

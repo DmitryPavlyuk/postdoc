@@ -16,7 +16,7 @@ starForecast <-function(sampl, forecastingSteps, arLags,threshold, fs.folder=NA,
       filename <- file.path(fs.folder, filename)
       if (!file.exists(filename)){
         ds <- daySec(as.POSIXct(last_date, format="%Y-%m-%d %H:%M:%S"))
-        filename <- file.path(fs.folder, paste0(wd(last_date),"_",ds,".rds"))
+        filename <- file.path(fs.folder, paste0(wday(last_date),"_",ds,".rds"))
       } 
     }
     if (!file.exists(filename)) stop(paste("No feature set found: ",filename))
