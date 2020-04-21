@@ -221,8 +221,8 @@ fsMTS::fsMTS(as.matrix(dat%>%select(-one_of("datetime","h"))),max.lag = 3, metho
 ```{r models}
 RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
                       validationSize, validationEnd, 
-                      lagMatrix,shortestA, cvgrid, 
-                      models.estimated.file, results.file,save.links.file){
+                      lagMatrix,shortestA, cvgrid, results.folder){
+  dir.create(results.folder, recursive = T)
   start.time <- Sys.time()
   results<-tibble()
   models.estimated <- c()
@@ -245,8 +245,8 @@ RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
     #estimate.HA(params,cv,results.file, models.estimated.file)
     #estimate.naive(params,cv,results.file, models.estimated.file)
     #estimate.arima(params,cv,results.file, models.estimated.file)
-    estimate.SpVAR(params,cv,dir)
-    #estimate.KNN(params,cv,dir)
+    #estimate.SpVAR(params,cv,results.folder)
+    estimate.KNN(params,cv,dir)
     print(Sys.time() - start.time)
   }
 }
@@ -267,7 +267,7 @@ rownames(dat)<-format(dat$datetime,"%Y-%m-%d %H:%M:%S")
 #                 exclude.series=NULL,
 #                 threshold=0.1)
 
-validationSize <- nrow(sampl$data)-24*60*3/ta
+validationSize <- nrow(sampl$data)-24*60*7/ta
 validationEnd <- nrow(sampl$data)
 forecastEvery<-36
 forecastingSteps<-12
@@ -299,7 +299,7 @@ EnsRanking.global <- file.path(dir,"fs",length(series),"EnsRanking",20160,maxlag
 
 
 # Define a grid for tuning parameters
-cvgrid <- expand.grid(trainingMinutes = c(24*60*3),
+cvgrid <- expand.grid(trainingMinutes = c(24*60*7),
                       include.mean = c(F),
                       arLags = c(maxlag),
                       stationary =  c(T),
@@ -308,7 +308,7 @@ cvgrid <- expand.grid(trainingMinutes = c(24*60*3),
                                   EnsVoting.global,
                                   EnsRanking.global),
                       threshold=c(0.1),
-                      ownlags=c(F),
+                      ownlags=c(T),
                       kneighbours=c(36))
 source(file.path("R","models_spvar.R"))
 source(file.path("R","cv_functions.R"))
@@ -316,7 +316,7 @@ source(file.path("R","cv_functions.R"))
 RunModels(sampl$data, series, ta, forecastingSteps, forecastEvery,
                       validationSize, validationEnd, 
                       lagMatrix, shortestA, cvgrid,
-                      models.estimated.file, results.file,save.links.file)
+                      results.folder="thtrain")
  
 ```
 

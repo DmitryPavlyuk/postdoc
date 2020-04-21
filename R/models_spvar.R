@@ -202,6 +202,7 @@ models.estimated <- readRDS(models.estimated.file)
 es <- NA
 if (!is.null(cv$exclude.s)) es<-strsplit(as.character(cv$exclude.s),":")[[1]]
 filename<-paste0(gsub("[.]","_",gsub(" ","_",gsub("/","_",modelid))),".rds")
+filename<-file.path(results.folder,filename)
 print(filename)
 if (!file.exists(filename)){
   results <- tibble()
@@ -236,6 +237,7 @@ estimate.KNN<-function(params, cv, results.folder){
                    cv$arLags,cv$kneighbours,ifelse(complete,"",cv$threshold),ifelse(complete,"",cv$ownlags),collapse = '')
   models.estimated <- readRDS(models.estimated.file)
   filename<-paste0(gsub("[.]","_",gsub(" ","_",gsub("/","_",modelid))),".rds")
+  filename<-file.path(results.folder,filename)
   print(filename)
   if (!file.exists(filename)){
     results <- tibble()
