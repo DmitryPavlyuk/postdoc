@@ -3,6 +3,7 @@ rollingWindow <- function(data, seriesNames,xModel, trainingWindowSize,
                           outfile="movingWindow.txt",...){
   df<-as.data.frame(data)
   rownames(df)<-data$datetime
+  
   df <- as.data.frame(df[,c(seriesNames)])
   n <- nrow(df)
   if (length(forecastingSteps)>1){

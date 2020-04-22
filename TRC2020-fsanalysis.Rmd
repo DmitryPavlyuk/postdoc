@@ -273,7 +273,7 @@ mlist <- list(Distance = fs.distance.global,
               LARS = fs.LARS.global,
               RF = fs.RF.global)
 
-th<-0.2
+th<-0.1
 plot(fs.CCF.global, col=rev(heat.colors(10)), key=NULL, main="FS")
 plot(cutoff(fs.CCF.global,th), col=rev(heat.colors(10)), key=NULL, main="FS")
 plot(cutoff(fs.LARS.global,th), col=rev(heat.colors(10)), key=NULL, main="FS")
@@ -287,7 +287,8 @@ plot(mlist[["EnsembleMajV"]], col=rev(heat.colors(10)), key=NULL, main="FS")
 val<-fsSimilarity(mlist[["EnsembleRank"]],mlist[["EnsembleMajV"]], method="Kuncheva")
 fsMTS::fsSparsity(mlist[["EnsembleRank"]])
 fsMTS::fsSparsity(mlist[["EnsembleMajV"]])
-dir.create(file.path(dir,"fs",length(series),"EnsRanking",20160,maxlag), recursive = T)
+dir.create(file.path(dir,"fs",length(series),"EnsVoting",20160,maxlag,th), recursive = T)
+dir.create(file.path(dir,"fs",length(series),"EnsRanking",20160,maxlag,th), recursive = T)
 saveRDS(mlist[["EnsembleMajV"]], file.path(dir,"fs",length(series),"EnsVoting",20160,maxlag,th,"2017-10-08_000000.rds"))
 saveRDS(mlist[["EnsembleRank"]], file.path(dir,"fs",length(series),"EnsRanking",20160,maxlag,th,"2017-10-08_000000.rds"))
 

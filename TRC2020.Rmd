@@ -246,7 +246,7 @@ RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
     #estimate.naive(params,cv,results.file, models.estimated.file)
     #estimate.arima(params,cv,results.file, models.estimated.file)
     #estimate.SpVAR(params,cv,results.folder)
-    estimate.KNN(params,cv,dir)
+    estimate.KNN(params,cv,results.folder)
     print(Sys.time() - start.time)
   }
 }
@@ -267,9 +267,12 @@ rownames(dat)<-format(dat$datetime,"%Y-%m-%d %H:%M:%S")
 #                 exclude.series=NULL,
 #                 threshold=0.1)
 
-validationSize <- nrow(sampl$data)-24*60*7/ta
-validationEnd <- nrow(sampl$data)
-forecastEvery<-36
+
+week<-24*60*7
+data<-sampl$data[-seq(1:(7*12)),]
+validationSize <- nrow(data)-3*week/ta
+validationEnd <- nrow(data)
+forecastEvery<-12*24
 forecastingSteps<-12
 
 
@@ -299,21 +302,19 @@ EnsRanking.global <- file.path(dir,"fs",length(series),"EnsRanking",20160,maxlag
 
 
 # Define a grid for tuning parameters
-cvgrid <- expand.grid(trainingMinutes = c(24*60*7),
+cvgrid <- expand.grid(trainingMinutes = c(week),
                       include.mean = c(F),
                       arLags = c(maxlag),
                       stationary =  c(T),
                       allowdrift =  c(F),
-                      fs.folder=c(CCF.global,
-                                  EnsVoting.global,
-                                  EnsRanking.global),
-                      threshold=c(0.1),
+                      fs.folder=c(NA,CCF.global,GLASSO.global,MI.global,LARS.global,RF.global),
+                      threshold=c(0.01,0.05,seq(0.1,0.9,by=0.1)),
                       ownlags=c(T),
                       kneighbours=c(36))
 source(file.path("R","models_spvar.R"))
 source(file.path("R","cv_functions.R"))
 # Run all models
-RunModels(sampl$data, series, ta, forecastingSteps, forecastEvery,
+RunModels(data, series, ta, forecastingSteps, forecastEvery,
                       validationSize, validationEnd, 
                       lagMatrix, shortestA, cvgrid,
                       results.folder="thtrain")
@@ -357,8 +358,9 @@ source(file.path("R","models_spvar.R"))
 # r1<-results
 
 reslist<-list()
-for (f in list.files("thres")){
-  reslist[[length(reslist)+1]]<-readRDS(file.path("thres", f))
+fold<-"thtrain"
+for (f in list.files(fold)){
+  reslist[[length(reslist)+1]]<-readRDS(file.path(fold, f))
 }
 results<-bind_rows(reslist)
 
