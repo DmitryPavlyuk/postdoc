@@ -259,6 +259,7 @@ simils
 
 
 ```{r create_ensemble}
+maxlag<-3
 fs.distance.global <- readRDS(file.path(dir,"fs",length(series),"distance",20160,maxlag,"2017-10-08_000000.rds"))
 fs.CCF.global <- readRDS(file.path(dir,"fs",length(series),"CCF",20160,maxlag,"2017-10-08_000000.rds"))
 fs.GLASSO.global <- readRDS(file.path(dir,"fs",length(series),"GLASSOloc",20160,maxlag,0.3,"2017-10-08_000000.rds"))
@@ -322,6 +323,40 @@ for (f in list.files(CCFg.folder)){
   rownames(EnsembleRank)<-rownames(EnsembleMajV)
   saveRDS(EnsembleMajV,file.path(EnsVotingg.folder,f))
   saveRDS(EnsembleRank,file.path(EnsRankingg.folder,f))
+  print(paste(f,"Sparsity",fsMTS::fsSparsity(EnsembleMajV)))
+}
+
+
+
+CCF.folder <- file.path(dir,"fs",length(series),"CCF",36,maxlag)
+MI.folder <- file.path(dir,"fs",length(series),"MI",36,maxlag)
+GLASSO.folder <- file.path(dir,"fs",length(series),"GLASSOloc",36,maxlag,0.3)
+LARS.folder <- file.path(dir,"fs",length(series),"LARS",36,maxlag)
+RF.folder <- file.path(dir,"fs",length(series),"RF",36,maxlag)
+
+EnsVoting.folder <- file.path(dir,"fs",length(series),"EnsVoting",36,maxlag,th)
+dir.create(EnsVoting.folder, recursive = T)
+EnsRanking.folder <- file.path(dir,"fs",length(series),"EnsRanking",36,maxlag,th)
+dir.create(EnsRanking.folder, recursive = T)
+
+for (f in list.files(CCF.folder)){
+  fs.CCF.dynamic <- readRDS(file.path(CCF.folder,f))
+  fs.GLASSO.dynamic <- readRDS(file.path(GLASSO.folder,f))
+  fs.MI.dynamic <- readRDS(file.path(MI.folder,f))
+  fs.LARS.dynamic <- readRDS(file.path(LARS.folder,f))
+  fs.RF.dynamic <- readRDS(file.path(RF.folder,f))
+  mlist <- list(Distance = fs.distance.global,
+              CCF = fs.CCF.dynamic,
+              GLASSO = fs.GLASSO.dynamic,
+              MI = fs.MI.dynamic,
+              LARS = fs.LARS.dynamic,
+              RF = fs.RF.dynamic)
+  EnsembleRank <- fsMTS::fsEnsemble(mlist, threshold = th, method="ranking")
+  EnsembleMajV <- fsMTS::fsEnsemble(mlist, threshold = th, method="majority")
+  colnames(EnsembleRank)<-colnames(EnsembleMajV)
+  rownames(EnsembleRank)<-rownames(EnsembleMajV)
+  saveRDS(EnsembleMajV,file.path(EnsVoting.folder,f))
+  saveRDS(EnsembleRank,file.path(EnsRanking.folder,f))
   print(paste(f,"Sparsity",fsMTS::fsSparsity(EnsembleMajV)))
 }
 
