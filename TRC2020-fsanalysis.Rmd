@@ -257,6 +257,29 @@ simils
 ```
 
 
+```{r create_drift}
+maxlag<-3
+CCF.folder <- file.path(dir,"fs",length(series),"CCF",36,maxlag)
+MI.folder <- file.path(dir,"fs",length(series),"MI",36,maxlag)
+GLASSO.folder <- file.path(dir,"fs",length(series),"GLASSOloc",36,maxlag,0.3)
+LARS.folder <- file.path(dir,"fs",length(series),"LARS",36,maxlag)
+RF.folder <- file.path(dir,"fs",length(series),"RF",36,maxlag)
+
+CCF.folder.drift <- file.path(dir,"fs",length(series),"CCFdrift",36,maxlag)
+SMOOTH_SIZE <- 6
+prev <- list()
+fold<-CCF.folder
+fold.drift <- CCF.folder.drift
+if (!file.exists(fold.drift)) dir.create(fold.drift)
+for (f in list.files(fold)){
+  fs <- readRDS(file.path(fold,f))
+  prev[[length(prev)+1]]<-fs
+  if (length(prev)>SMOOTH_SIZE) prev[[1]] <- NULL
+  fs.drift <- fsMTS::fsEnsemble(prev, threshold = 1, method="ranking")
+  saveRDS(fs.drift,file.path(fold.drift,f))
+}
+
+```
 
 ```{r create_ensemble}
 fs.distance.global <- readRDS(file.path(dir,"fs",length(series),"distance",20160,maxlag,"2017-10-08_000000.rds"))
@@ -325,4 +348,9 @@ for (f in list.files(CCFg.folder)){
   print(paste(f,"Sparsity",fsMTS::fsSparsity(EnsembleMajV)))
 }
 
+```
+
+```{r}
+needs(QuACN)
+offdiagonal(g)
 ```

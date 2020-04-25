@@ -166,13 +166,13 @@ data.scaled<-cbind(sampl$data[,1],scale(sampl$data[,-1]))
 estimateFeatures(fs.function=fsMTS::fsMTS, 
                  data = sampl$data, 
                  seriesNames = series,
-                 trainingWindowSize = 4032,#nrow(sampl$data),#12*24*0.5,
+                 trainingWindowSize = nrow(sampl$data),#12*24*0.5,
                  forecastEvery = 1,
                  max.lag = 3,
-                 fs.folder = file.path(dir,"fs",length(series),"MIloc"),
+                 fs.folder = file.path(dir,"fs",length(series),"GLASSOloc"),
                  req.packages = c("fsMTS"),
-                 method="MI",
-                 rho=0.3,
+                 method="GLASSO",
+                 rho=0.5,
                  shortest = shortestA,
                  step = ta,
                  localized = T,
@@ -245,7 +245,7 @@ RunModels <- function(data, series, ta, forecastingSteps, forecastEvery,
     #estimate.HA(params,cv,results.file, models.estimated.file)
     #estimate.naive(params,cv,results.file, models.estimated.file)
     #estimate.arima(params,cv,results.file, models.estimated.file)
-    #estimate.SpVAR(params,cv,results.folder)
+    estimate.SpVAR(params,cv,results.folder)
     estimate.KNN(params,cv,results.folder)
     print(Sys.time() - start.time)
   }
@@ -269,10 +269,10 @@ rownames(dat)<-format(dat$datetime,"%Y-%m-%d %H:%M:%S")
 
 
 week<-24*60*7
-data<-sampl$data[-seq(1:(7*12)),]
-validationSize <- nrow(data)-3*week/ta
+data<-sampl$data#[-seq(1:(19*12)),]
+validationSize <- nrow(data)-2*week/ta
 validationEnd <- nrow(data)
-forecastEvery<-12*24
+forecastEvery<-12
 forecastingSteps<-12
 
 
@@ -288,8 +288,8 @@ MIg.folder <- file.path(dir,"fs",length(series),"MIg",36,maxlag)
 GLASSOg.folder <- file.path(dir,"fs",length(series),"GLASSOlocg",36,maxlag,0.3)
 LARSg.folder <- file.path(dir,"fs",length(series),"LARSg",36,maxlag)
 RFg.folder <- file.path(dir,"fs",length(series),"RFg",36,maxlag)
-EnsVotingg.folder <- file.path(dir,"fs",length(series),"EnsVotingg",36,maxlag,0.2)
-EnsRankingg.folder <- file.path(dir,"fs",length(series),"EnsRankingg",36,maxlag,0.2)
+EnsVotingg.folder <- file.path(dir,"fs",length(series),"EnsVotingg",36,maxlag,0.1)
+EnsRankingg.folder <- file.path(dir,"fs",length(series),"EnsRankingg",36,maxlag,0.1)
 
 distance.folder <- file.path(dir,"fs",length(series),"distance",20160,maxlag,"2017-10-08_000000.rds")
 CCF.global <- file.path(dir,"fs",length(series),"CCF",20160,maxlag,"2017-10-08_000000.rds")
@@ -297,18 +297,22 @@ GLASSO.global <- file.path(dir,"fs",length(series),"GLASSOloc",20160,maxlag,0.3,
 MI.global <- file.path(dir,"fs",length(series),"MI",4032,maxlag,"2017-08-13_000000.rds")
 LARS.global <- file.path(dir,"fs",length(series),"LARS",20160,maxlag,"2017-10-08_000000.rds")
 RF.global <- file.path(dir,"fs",length(series),"RF",20160,maxlag,"2017-10-08_000000.rds")
-EnsVoting.global <- file.path(dir,"fs",length(series),"EnsVoting",20160,maxlag,0.2,"2017-10-08_000000.rds")
-EnsRanking.global <- file.path(dir,"fs",length(series),"EnsRanking",20160,maxlag,0.2,"2017-10-08_000000.rds")
+EnsVoting.global <- file.path(dir,"fs",length(series),"EnsVoting",20160,maxlag,0.1,"2017-10-08_000000.rds")
+EnsRanking.global <- file.path(dir,"fs",length(series),"EnsRanking",20160,maxlag,0.1,"2017-10-08_000000.rds")
 
 
 # Define a grid for tuning parameters
-cvgrid <- expand.grid(trainingMinutes = c(week),
+cvgrid <- expand.grid(trainingMinutes = c(2*week),
                       include.mean = c(F),
                       arLags = c(maxlag),
                       stationary =  c(T),
                       allowdrift =  c(F),
-                      fs.folder=c(NA,CCF.global,GLASSO.global,MI.global,LARS.global,RF.global),
-                      threshold=c(0.01,0.05,seq(0.1,0.9,by=0.1)),
+                      fs.folder=c(CCF.folder,
+                                  MI.folder,
+                                  GLASSO.folder,
+                                  LARS.folder,
+                                  RF.folder),
+                      threshold=c(0.01,0.05,0.1,0.15,0.2,0.25,0.3,0.5,0.7,0.9),
                       ownlags=c(T),
                       kneighbours=c(36))
 source(file.path("R","models_spvar.R"))
@@ -317,7 +321,7 @@ source(file.path("R","cv_functions.R"))
 RunModels(data, series, ta, forecastingSteps, forecastEvery,
                       validationSize, validationEnd, 
                       lagMatrix, shortestA, cvgrid,
-                      results.folder="thtrain")
+                      results.folder="thtrain-hourly")
  
 ```
 
@@ -358,8 +362,10 @@ source(file.path("R","models_spvar.R"))
 # r1<-results
 
 reslist<-list()
-fold<-"thtrain"
+results<-NULL
+fold<-file.path(dir,"thtrain-hourly","complete")
 for (f in list.files(fold)){
+  print(f)
   reslist[[length(reslist)+1]]<-readRDS(file.path(fold, f))
 }
 results<-bind_rows(reslist)
@@ -371,14 +377,13 @@ options(pillar.sigfig = 4)
 # s<-cvSummary(results, mae, cumulative=F, params=params)%>%
 #     mutate(modelid=paste(model,trainingMinutes, arLags, include.mean,fs.folder,threshold,ownlags))%>%
 #     mutate(modelid=gsub(" NA","",modelid))
-params <- c('trainingMinutes','arLags','fs.folder','threshold','ownlags','kneighbours')
+params <- c('trainingMinutes','arLags','fs.folder','threshold','ownlags')
 s<-cvSummary(results, mae, cumulative=F, params=params)%>%
-    mutate(modelid=paste(model,trainingMinutes, arLags,fs.folder,threshold,ownlags,kneighbours))%>%
+    mutate(modelid=paste(model,trainingMinutes, arLags,fs.folder,threshold,ownlags))%>%
     mutate(modelid=gsub(" NA","",modelid))
 
 
-s%>%filter(forecast_horizon<13)%>%ungroup%>%mutate(key=paste(model,trainingMinutes,fs.folder))%>%select(key,threshold,forecast_horizon,MAE)%>%filter(forecast_horizon==3)%>%
-  spread(key=threshold, value=MAE)
+s%>%ungroup%>%mutate(key=paste(model,trainingMinutes,fs.folder))%>%select(key,threshold,forecast_horizon,MAE)%>%spread(key=threshold, value=MAE)%>%filter(forecast_horizon==3)%>%print(n=34)
 
 #saveRDS(s, summary.file)
 
