@@ -272,7 +272,7 @@ week<-24*60*7
 data<-sampl$data#[-seq(1:(19*12)),]
 validationSize <- nrow(data)-2*week/ta
 validationEnd <- nrow(data)
-forecastEvery<-12
+forecastEvery<-4
 forecastingSteps<-12
 
 
@@ -301,18 +301,23 @@ EnsVoting.global <- file.path(dir,"fs",length(series),"EnsVoting",20160,maxlag,0
 EnsRanking.global <- file.path(dir,"fs",length(series),"EnsRanking",20160,maxlag,0.1,"2017-10-08_000000.rds")
 
 
+CCF.folder.drift <- file.path(dir,"fs",length(series),"CCFdrift",36,maxlag)
+GLASSO.folder.drift <- file.path(dir,"fs",length(series),"GLASSOlocdrift",36,maxlag)
+MI.folder.drift <- file.path(dir,"fs",length(series),"MIdrift",36,maxlag)
+LARS.folder.drift <- file.path(dir,"fs",length(series),"LARSdrift",36,maxlag)
+RF.folder.drift <- file.path(dir,"fs",length(series),"RFdrift",36,maxlag)
+EnsVoting.folder.drift <- file.path(dir,"fs",length(series),"EnsVotingdrift",36,maxlag,0.1)
+EnsRanking.folder.drift <- file.path(dir,"fs",length(series),"EnsRankingdrift",36,maxlag,0.1)
+
 # Define a grid for tuning parameters
-cvgrid <- expand.grid(trainingMinutes = c(2*week),
+cvgrid <- expand.grid(trainingMinutes = c(week),
                       include.mean = c(F),
                       arLags = c(maxlag),
                       stationary =  c(T),
                       allowdrift =  c(F),
-                      fs.folder=c(CCF.folder,
-                                  MI.folder,
-                                  GLASSO.folder,
-                                  LARS.folder,
-                                  RF.folder),
-                      threshold=c(0.01,0.05,0.1,0.15,0.2,0.25,0.3,0.5,0.7,0.9),
+                      fs.folder=c(EnsVoting.folder.drift,
+                                  EnsRanking.folder.drift),
+                      threshold=c(0.1),
                       ownlags=c(T),
                       kneighbours=c(36))
 source(file.path("R","models_spvar.R"))
@@ -363,7 +368,7 @@ source(file.path("R","models_spvar.R"))
 
 reslist<-list()
 results<-NULL
-fold<-file.path(dir,"thtrain-hourly","complete")
+fold<-file.path(dir,"models-20min","competition2")
 for (f in list.files(fold)){
   print(f)
   reslist[[length(reslist)+1]]<-readRDS(file.path(fold, f))
@@ -378,49 +383,71 @@ options(pillar.sigfig = 4)
 #     mutate(modelid=paste(model,trainingMinutes, arLags, include.mean,fs.folder,threshold,ownlags))%>%
 #     mutate(modelid=gsub(" NA","",modelid))
 params <- c('trainingMinutes','arLags','fs.folder','threshold','ownlags')
-s<-cvSummary(results, mae, cumulative=F, params=params)%>%
+s<-cvSummary(results, rmse, cumulative=F, params=params)%>%
     mutate(modelid=paste(model,trainingMinutes, arLags,fs.folder,threshold,ownlags))%>%
     mutate(modelid=gsub(" NA","",modelid))
 
 
-s%>%ungroup%>%mutate(key=paste(model,trainingMinutes,fs.folder))%>%select(key,threshold,forecast_horizon,MAE)%>%spread(key=threshold, value=MAE)%>%filter(forecast_horizon==3)%>%print(n=34)
+s%>%ungroup%>%mutate(key=paste(model,trainingMinutes,fs.folder))%>%select(key,threshold,forecast_horizon,RMSE)%>%spread(key=forecast_horizon, value=RMSE)%>%print(n=34)
 
 #saveRDS(s, summary.file)
 
-s%>%
-    group_by(modelid,forecast_horizon)%>%filter(MAE==min(MAE))%>%ungroup%>%select(-c('allowdrift','stationary','include.mean'))%>%print(n=50)
 
-pres<-results%>%filter(forecast_horizon==12)%>%mutate(last_date_d = format(datetime, format="%w %H:%M",tz="GMT"))%>%group_by(model,last_date_d)%>%summarise(mean.mae=mae(actual, forecasted))%>%arrange(last_date_d)
-pres%>%ggplot(aes(x = last_date_d, y=mean.mae, group=1)) +geom_line()
+gtmp<-results%>%filter(forecast_horizon==3)%>%mutate(key=paste(model,fs.folder))%>%group_by(key,datetime)%>%summarise(mn=rmse(actual,forecasted))
+gtmp<-gtmp%>%ungroup%>%mutate(key=ifelse(str_detect(key,"CCF"),"CCF",key))%>%
+    mutate(key=ifelse(str_detect(key,"GLASSO"),"GLASSO",key))%>%
+    mutate(key=ifelse(str_detect(key,"MI"),"MI",key))%>%
+    mutate(key=ifelse(str_detect(key,"LARS"),"LARS",key))%>%
+    mutate(key=ifelse(str_detect(key,"RF"),"RF",key))%>%
+    mutate(key=ifelse(str_detect(key,"EnsVoting"),"EnsVoting",key))%>%
+    mutate(key=ifelse(str_detect(key,"EnsRanking"),"EnsRanking",key))
 
-(winners3 <- s%>%
-    filter(forecast_horizon==3)%>%
-    group_by(model)%>%filter(MAE==min(MAE))%>%ungroup%>%select(-c('allowdrift','stationary','include.mean')))
+gtmp<-gtmp%>%filter(wday(datetime)==3)%>%mutate(dow_time=format(datetime, "%H"))%>%group_by(key,dow_time)%>%summarise(mn=mean(mn), last_date=last(datetime))
 
 
- results.cum <-results%>%
-    mutate(modelid=gsub(" NA","",paste(model,trainingMinutes, arLags, ccfThreshold,
-                         include.mean,stationary,allowdrift,radius1,radius2,include_ratio, spatial_step,modelsp,decay)))%>%
-    group_by(model_hash,detector)%>%
-    arrange(model_hash,detector,forecast_horizon)%>%
-    mutate(cumactual=cumsum(actual),cumforecasted=cumsum(forecasted))
+gtmp<-gtmp%>%spread(key=key,value=mn)%>%
+    mutate(`CCF vs. EnsRanking`=CCF-EnsRanking)%>%
+    mutate(`MI vs. EnsRanking`=MI-EnsRanking)%>%
+    mutate(`LARS vs. EnsRanking`=LARS-EnsRanking)%>%
+    mutate(`RF vs. EnsRanking`=RF-EnsRanking)%>%
+    mutate(`GLASSO vs. EnsRanking`=GLASSO-EnsRanking)%>%
+    mutate(`EnsVoting vs. EnsRanking`=EnsVoting-EnsRanking)%>%
+    select(last_date,`CCF vs. EnsRanking`,`MI vs. EnsRanking`,`LARS vs. EnsRanking`,`RF vs. EnsRanking`,
+           `GLASSO vs. EnsRanking`)%>%
+    gather(`CCF vs. EnsRanking`,`MI vs. EnsRanking`,`LARS vs. EnsRanking`,`RF vs. EnsRanking`,
+           `GLASSO vs. EnsRanking`,key="key", value="Difference")
+  
+  
+gtmp%>%ggplot(aes(x = last_date, y=Difference, group=key, col=key))+
+  geom_ma(size=1,n=2,linetype=1)+
+  scale_x_datetime(labels = date_format("%H:%M", tz="Europe/Helsinki"),date_breaks = "4 hours",expand = c(0,0))+
+  xlab("Time of the day") + ylab("Difference in RMSE")+ guides(col=guide_legend(title="Pair-wise comparison"))+
+  theme(legend.position="bottom")+scale_color_brewer(palette="Dark2")
 
-#tmodels<-c("autoarima 7200 FALSE FALSE FALSE","SpatialARIMAX 7200 FALSE FALSE FALSE 10 30 FALSE 5",           "SpatialSVR 7200 10 30 FALSE 5 svm","STAR ccf 7200 6 0.1 FALSE")
- tmodels<-c("autoarima 7200 FALSE FALSE FALSE","SpatialARIMAX 7200 FALSE FALSE FALSE 10 30 FALSE 5",           "SpatialSVR 7200 10 30 FALSE 5 svm")
-results.cum.filtered<-results.cum%>%filter(forecast_horizon==3,modelid %in% tmodels)%>% mutate(modelid=ifelse(str_detect(modelid,"^STAR ccf"),"SpVAR-cc",modelid))%>% mutate(modelid=ifelse(str_detect(modelid,"^SpatialARIMAX"),"SpX-ARIMAX",modelid))%>% mutate(modelid=ifelse(str_detect(modelid,"^SpatialSVR"),"SpX-SVR",modelid))%>% mutate(modelid=ifelse(str_detect(modelid,"^autoarima"),"ARIMA",modelid))
- 
-gtmp1<-results.cum.filtered%>%mutate(last_date_d = format(datetime, format="%H:%M",tz="GMT"))
 
-gtmp2<-gtmp1%>%group_by(modelid,last_date_d)%>%summarise(mn=mae(cumactual,cumforecasted))
-gtmp2%>%ggplot(aes(x = mn, group=modelid, fill=modelid)) +
-  geom_density(kernel = "epanechnikov", alpha = 0.4)+
-  scale_x_continuous(expand=c(0,0))+
-  scale_y_continuous(expand=c(0,0))+labs(x="Temporarily averaged MAE", fill="Model")
- 
-gtmp2<-gtmp1%>%group_by(modelid,detector)%>%summarise(mn=mae(cumactual,cumforecasted))
-gtmp2%>%ggplot(aes(x = mn, group=modelid, fill=modelid)) +
-  geom_density(kernel = "epanechnikov", alpha = 0.4)+
-  scale_x_continuous(expand=c(0,0))+
-  scale_y_continuous(expand=c(0,0))+labs(x="Spatially averaged MAE", fill="Model")
- 
+
+
+
+gtmp<-results%>%filter(forecast_horizon==3)%>%mutate(key=paste(model,fs.folder))%>%group_by(key,datetime)%>%summarise(mn=rmse(actual,forecasted))
+gtmp<-gtmp%>%ungroup%>%mutate(key=ifelse(str_detect(key,"CCFdrift"),"Drift",key))%>%
+  mutate(key=ifelse(str_detect(key,"CCFg"),"Daytime",key))%>%
+  mutate(key=ifelse(str_detect(key,"CCF/36"),"Dynamic",key))%>%
+  mutate(key=ifelse(str_detect(key,"CCF/201"),"Global",key))
+    
+
+gtmp<-gtmp%>%filter(wday(datetime)==3)%>%mutate(dow_time=format(datetime, "%H:%M"))%>%group_by(key,dow_time)%>%summarise(mn=mean(mn), last_date=last(datetime))
+
+
+gtmp<-gtmp%>%spread(key=key,value=mn)%>%
+    mutate(`Global vs. Drift`=Global-Drift)%>%
+    mutate(`Dynamic vs. Drift`=Dynamic-Drift)%>%
+    mutate(`Daytime vs. Drift`=Daytime-Drift)%>%
+    select(last_date,`Global vs. Drift`,`Dynamic vs. Drift`,`Daytime vs. Drift`)%>%
+    gather(`Global vs. Drift`,`Dynamic vs. Drift`,`Daytime vs. Drift`,key="key", value="Difference")
+  
+gtmp%>%ggplot(aes(x = last_date, y=Difference, group=key, col=key))+
+  geom_line(size=1,linetype=1)+
+  scale_x_datetime(labels = date_format("%H:%M", tz="Europe/Helsinki"),date_breaks = "4 hours",expand = c(0,0))+
+  xlab("Time of the day") + ylab("Difference in RMSE")+ guides(col=guide_legend(title="Pair-wise comparison"))+
+  theme(legend.position="bottom")+scale_color_brewer(palette="Dark2")
 ```
