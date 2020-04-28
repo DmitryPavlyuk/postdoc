@@ -421,7 +421,45 @@ for (f in list.files(CCF.folder)){
 
 ```
 
-```{r}
+```{r complexity}
+install.packages("graph")
+require(needs)
+BiocManager::install("Rgraphviz")
 needs(QuACN)
+needs(Rgraphviz)
+set.seed(123)
+g <- randomEGraph(as.character(1:10), 0.6)
 offdiagonal(g)
+
+
+convertToGraph<-function(fs){
+  mEmpty <- matrix(0, nrow=nrow(fs),ncol=ncol(fs))
+  adjM<-cbind(fs,mEmpty,mEmpty)
+  adjM<-adjM+t(adjM)
+  adjM[adjM>0]<-1
+  colnames(adjM)<-rownames(adjM)
+  g<-as(adjM,"graphNEL")
+  return(g)
+}
+
+for (f in c(distance.folder,CCF.global, GLASSO.global, MI.global,LARS.global,RF.global,EnsVoting.global,EnsRanking.global)){
+  print(paste(f,offdiagonal(convertToGraph(cutoff(readRDS(f),threshold=0.1)))))
+}
+
+options(pillar.sigfig = 4)
+
+res<-list()
+for (fold in c(CCFg.folder,MIg.folder,GLASSOg.folder,LARSg.folder,RFg.folder,EnsVotingg.folder,EnsRankingg.folder)){
+  for (f in list.files(fold)){
+    mFS=readRDS(file.path(fold,f))
+    m<-cutoff(mFS,threshold=0.1)
+    g<-convertToGraph(m)
+    val <- offdiagonal(g)
+    print(paste(fold,f,val))
+    res[[length(res)+1]]<-list(folder=fold,file=f,odc=val)
+  }
+}
+all<-bind_rows(res)
+all%>%group_by(folder)%>%summarise(mean.odc = mean(odc))
+
 ```
