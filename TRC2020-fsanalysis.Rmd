@@ -180,18 +180,48 @@ write.csv(mysample$config.nodes%>%filter(node_name %in% related)%>%inner_join(re
 ```
 
 ```{r}
-dates <- seq(from=date.from, to=date.to, by="5 min")
-
-mlist<-list()
-for(row in 1:length(dates)){
-  name<-format(dates[row],fmt)
-  filename <- paste0(name,".rds")
-  if (file.exists(file.path(folder, filename))){
-    fs <- readRDS(file.path(folder, filename))
-    mlist[[name]]<-fs
-  }
+loadDay<-function(datetime, folder){
+  fmt <- "%Y-%m-%d_%H%M%S"
+  dates <- seq(from=datetime, to=datetime+(24*60-1)*60, by="5 min")
+  mlist<-list()
+  for(row in 1:length(dates)){
+    name<-format(dates[row],fmt)
+    filename <- paste0(name,".rds")
+    if (file.exists(file.path(folder, filename))){
+      fs <- readRDS(file.path(folder, filename))
+      mlist[[name]]<-fs
+    }
+  }  
+  return(mlist)
 }
-msim<-fsSimilarityMatrix(mlist,threshold=0.2,method="Kuncheva")
+
+
+fmt <- "%Y-%m-%d_%H%M%S"
+date.from <- as.POSIXct("2017-07-31_000000",format=fmt)
+date.to <- as.POSIXct("2017-10-07_000000",format=fmt)
+days <- seq(from=date.from, to=date.to, by="1 days")
+cl <- makeCluster(7, outfile="outfile.txt")
+registerDoParallel(cl)
+foreach (d = 1:length(days),.export=c("loadDay"),
+                  .packages=c("fsMTS","dplyr")) %dopar% {
+  res<-list()
+  day<-days[d]
+  for (fold in c(CCF.folder,MI.folder,GLASSO.folder,LARS.folder,RF.folder,
+     CCF.folder.drift,MI.folder.drift,GLASSO.folder.drift,LARS.folder.drift,RF.folder.drift)){
+    print(paste(day,fold))
+    ml<-loadDay(day,fold)
+    msim<-fsSimilarityMatrix(ml,threshold=0.1,method="Kuncheva")
+    print(paste("Stability", mean(msim)))
+    res[[length(res)+1]]<-list(folder=fold,date=day,stability=mean(msim))
+  }
+  result<-bind_rows(res)
+  fmt <- "%Y-%m-%d_%H%M%S"
+  filename<-paste0(format(day,fmt),".rds")
+  print(filename)
+  saveRDS(result, file.path("stability", filename))
+}
+
+te<-readRDS(file.path("stability","2017-07-31_000000.rds"))
 image(msim)
 mean(msim)
 max(msim)

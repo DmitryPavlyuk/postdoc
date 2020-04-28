@@ -282,6 +282,8 @@ MI.folder <- file.path(dir,"fs",length(series),"MI",36,maxlag)
 GLASSO.folder <- file.path(dir,"fs",length(series),"GLASSOloc",36,maxlag,0.3)
 LARS.folder <- file.path(dir,"fs",length(series),"LARS",36,maxlag)
 RF.folder <- file.path(dir,"fs",length(series),"RF",36,maxlag)
+EnsVoting.folder <- file.path(dir,"fs",length(series),"EnsVoting",36,maxlag,0.1)
+EnsRanking.folder <- file.path(dir,"fs",length(series),"EnsRanking",36,maxlag,0.1)
 
 CCFg.folder <- file.path(dir,"fs",length(series),"CCFg",36,maxlag)
 MIg.folder <- file.path(dir,"fs",length(series),"MIg",36,maxlag)
