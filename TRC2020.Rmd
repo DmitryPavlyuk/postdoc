@@ -172,7 +172,7 @@ estimateFeatures(fs.function=fsMTS::fsMTS,
                  fs.folder = file.path(dir,"fs",length(series),"GLASSOloc"),
                  req.packages = c("fsMTS"),
                  method="GLASSO",
-                 rho=0.5,
+                 rho=0.0005,
                  shortest = shortestA,
                  step = ta,
                  localized = T,
@@ -307,22 +307,40 @@ cvgrid <- expand.grid(trainingMinutes = c(2*week),
                       arLags = c(maxlag),
                       stationary =  c(T),
                       allowdrift =  c(F),
-                      fs.folder=c(CCF.folder,
-                                  MI.folder,
-                                  GLASSO.folder,
-                                  LARS.folder,
-                                  RF.folder),
-                      threshold=c(0.01,0.05,0.1,0.15,0.2,0.25,0.3,0.5,0.7,0.9),
+                      fs.folder=c(file.path(dir,"fs",length(series),"GLASSOloc",20160,maxlag,"0.0005","2017-10-08_000000.rds")),
+                      threshold=c(0.9),
                       ownlags=c(T),
                       kneighbours=c(36))
+rgrid<-NULL
+rgrid <- bind_rows(rgrid,cvgrid)
 source(file.path("R","models_spvar.R"))
 source(file.path("R","cv_functions.R"))
 # Run all models
 RunModels(data, series, ta, forecastingSteps, forecastEvery,
                       validationSize, validationEnd, 
-                      lagMatrix, shortestA, cvgrid,
-                      results.folder="thtrain-hourly")
+                      lagMatrix, shortestA, rgrid,
+                      results.folder="thtrain-hourly-glasso")
  
+
+test<-readRDS(file.path(dir,"fs",length(series),"GLASSOloc",20160,maxlag,0.0005,"2017-10-08_000000.rds"))
+fsSparsity(test)
+
+#GLASSO sparsity
+#rho = 0.0005 - 0.8774414
+#rho = 0.001 - 0.7918294
+#rho = 0.002 - 0.6700033
+#rho = 0.005 - 0.4963379
+#rho = 0.02 - 0.2907715
+#rho = 0.03 - 0.2545573
+#rho = 0.1 - 0.193929
+#rho = 0.3 - 0.157959
+#rho = 0.37 - 0.1051432
+#rho = 0.43 - 0.05037435
+bind_rows(unlist(rgrid))
+for (r in 1:nrow(rgrid)){
+    cv <- rgrid[r,]
+  print(cv)
+}
 ```
 
 ```{r knn}
@@ -363,7 +381,7 @@ source(file.path("R","models_spvar.R"))
 
 reslist<-list()
 results<-NULL
-fold<-file.path(dir,"thtrain-hourly","complete")
+fold<-file.path(dir,"thtrain-hourly","global","STAR")
 for (f in list.files(fold)){
   print(f)
   reslist[[length(reslist)+1]]<-readRDS(file.path(fold, f))
