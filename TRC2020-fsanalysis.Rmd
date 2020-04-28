@@ -186,7 +186,8 @@ loadDay<-function(datetime, folder){
   mlist<-list()
   for(row in 1:length(dates)){
     name<-format(dates[row],fmt)
-    filename <- paste0(name,".rds")
+    #filename <- paste0(name,".rds")
+    filename <- file.path(paste0(wday(dates[row]),"_",daySec(dates[row]),".rds"))
     if (file.exists(file.path(folder, filename))){
       fs <- readRDS(file.path(folder, filename))
       mlist[[name]]<-fs
@@ -194,20 +195,19 @@ loadDay<-function(datetime, folder){
   }  
   return(mlist)
 }
-
+needs(lubridate)
 
 fmt <- "%Y-%m-%d_%H%M%S"
 date.from <- as.POSIXct("2017-07-31_000000",format=fmt)
-date.to <- as.POSIXct("2017-10-07_000000",format=fmt)
+date.to <- as.POSIXct("2017-08-06_000000",format=fmt)
 days <- seq(from=date.from, to=date.to, by="1 days")
-cl <- makeCluster(7, outfile="outfile.txt")
+cl <- makeCluster(5, outfile="outfile.txt")
 registerDoParallel(cl)
 foreach (d = 1:length(days),.export=c("loadDay"),
-                  .packages=c("fsMTS","dplyr")) %dopar% {
+                  .packages=c("fsMTS","dplyr","lubridate")) %dopar% {
   res<-list()
   day<-days[d]
-  for (fold in c(CCF.folder,MI.folder,GLASSO.folder,LARS.folder,RF.folder,
-     CCF.folder.drift,MI.folder.drift,GLASSO.folder.drift,LARS.folder.drift,RF.folder.drift)){
+  for (fold in c(CCFg.folder,MIg.folder,GLASSOg.folder,LARSg.folder,RFg.folder,EnsVotingg.folder,EnsRankingg.folder)){
     print(paste(day,fold))
     ml<-loadDay(day,fold)
     msim<-fsSimilarityMatrix(ml,threshold=0.1,method="Kuncheva")
@@ -218,76 +218,67 @@ foreach (d = 1:length(days),.export=c("loadDay"),
   fmt <- "%Y-%m-%d_%H%M%S"
   filename<-paste0(format(day,fmt),".rds")
   print(filename)
-  saveRDS(result, file.path("stability", filename))
+  saveRDS(result, file.path("stability","daytime", filename))
 }
 
-te<-readRDS(file.path("stability","2017-07-31_000000.rds"))
-image(msim)
-mean(msim)
-max(msim)
-
-k
-needs(cluster)
-d<-1/msim
-hc<-hclust(as.dist(d))
-(memb <- cutree(hc, k = 3))
-
-HC <- hclust(as.dist(d), method="single")
-plot(2:10, sapply(2:10, function(i) { 
-   mean(silhouette(cutree(HC, i), dmatrix=d)[,"sil_width"]) }),
-   xlab="Number of clusters", ylab="Average Silhouette", type="b", pch=20)
-
-
-simils <- tibble(datetime = dates,CCF=NA, CCFvsMean=NA, CCFaveg = NA, CCFsmoothed = NA)
-mean.fs <- readRDS(file.path("C:/tmp/32","CCF",20160,3,"2017-10-08_000000.rds"))
-
-fs.prev<-NULL
-fs.prev.smoothed<-NULL
-fs.smooth <- list()
-SMOOTH_SIZE <- 12
-thres<-0.01
-alpha = 0.4
-
-image(cutoff(mean.fs, thres))
-image(cutoff(mlist[[54]], thres))
-
-for(row in 1:nrow(simils)){
-  filename <- paste0(format(simils[row,]$datetime,fmt),".rds")
-  if (file.exists(file.path(folder, filename))){
-    fs <- readRDS(file.path(folder, filename))
-    if (!is.null(fs.prev)){
-      simils[row,]$CCF<-fsMTS::fsSimilarity(fs.prev, fs,cutoff=T, threshold = thres, method="Kuncheva")
-    }
-    simils[row,]$CCFvsMean<-fsMTS::fsSimilarity(mean.fs, fs,cutoff=T, threshold = thres, method="Kuncheva")
-    
-    fs.cut<-fsMTS::cutoff(fs,threshold = thres)
-    fs.smooth<-list.prepend(fs.smooth, row=fs.cut)
-    if (length(fs.smooth)>SMOOTH_SIZE) fs.smooth<-list.remove(fs.smooth, length(fs.smooth))
-    
-    smoothed <- matSmoothing(fs.smooth,alpha)
-    if (!is.null(fs.prev.smoothed)){
-      simils[row,]$CCFsmoothed<-fsMTS::fsSimilarity(fs.prev.smoothed, smoothed,cutoff=T, 
-                                                    threshold = thres, method="Kuncheva")
-    }
-    
-    simils[row,]$CCFaveg <- mean(fs, na.rm = T)
-    
-    fs.prev.smoothed<-smoothed
-    fs.prev <- fs
-  }
-  svMisc::progress(100*row/nrow(simils))
+res<-list()
+for (f in list.files(file.path("stability","daytime"))){
+  res[[length(res)+1]]<-readRDS(file.path("stability","daytime",f))
 }
+all<-bind_rows(res)
+all%>%group_by(folder)%>%summarise(mean.stability = mean(stability))
 
-mean_roll <- rollify(mean, window = 24)
 
-simils<-simils%>%mutate(CCF.ma=mean_roll(CCF))
+plot(mlist[["EnsRanking"]], col=rev(heat.colors(10)), key=NULL, main="EnsRanking",ylab="",xlab="", axis.col = NULL, axis.row = NULL,border="lightgrey")
 
-simils%>%select(datetime,CCF,CCFsmoothed,CCF.ma,CCFvsMean)%>%gather(key="key", value="value",-one_of("datetime"))%>%
-  ggplot(aes(x = datetime, y=value, group=key, col=key))+geom_line()
-
-summary(simils)
-simils
 ```
+
+```{r ensemble_similarity}
+mlist<-list(
+  CCF=readRDS(CCF.global),
+  GLASSO=readRDS(GLASSO.global),
+  MI=readRDS(MI.global),
+  LARS=readRDS(LARS.global),
+  RF=readRDS(RF.global),
+  Distance=readRDS(distance.folder),
+  EnsVoting=readRDS(EnsVoting.global),
+  EnsRanking=readRDS(EnsRanking.global)
+)
+plot(mlist[["EnsRanking"]], col=rev(heat.colors(10)), key=NULL, main="EnsRanking",ylab="",xlab="", axis.col = NULL, axis.row = NULL,border="lightgrey")
+plot(mlist[["EnsVoting"]], col=rev(heat.colors(10)), key=NULL, main="EnsVoting",ylab="",xlab="", axis.col = NULL, axis.row = NULL,border="lightgrey")
+
+msimilarity<-fsSimilarityMatrix(mlist, threshold = 0.1, method="Kuncheva")
+
+plot(msimilarity, digits=2, col=rev(heat.colors(ncol(msimilarity))), key=NULL,
+     main="System-wise", cex.axis=0.7,ylab="",xlab="")
+
+
+matrixes<-list()
+for (f in list.files(CCFg.folder)){
+  mlist<-list(
+    CCF=readRDS(file.path(CCFg.folder,f)),
+    GLASSO=readRDS(file.path(GLASSOg.folder,f)),
+    MI=readRDS(file.path(MIg.folder,f)),
+    LARS=readRDS(file.path(LARSg.folder,f)),
+    RF=readRDS(file.path(RFg.folder,f)),
+    Distance=readRDS(distance.folder),
+    EnsVoting=readRDS(file.path(EnsVotingg.folder,f)),
+    EnsRanking=readRDS(file.path(EnsRankingg.folder,f))
+  )
+  print(f)
+  matrixes[[length(matrixes)+1]]<-fsSimilarityMatrix(mlist, threshold = 0.1, method="Kuncheva")
+}
+res<-apply(simplify2array(matrixes), 1:2, mean)
+
+fmt <- "%Y-%m-%d_%H%M%S"
+day<-as.POSIXct("2017-08-02_000000",fmt)
+mlist<-loadDay(day,CCFg.folder)
+res<-fsSimilarityMatrix(mlist, threshold = 0.1,method="Kuncheva")
+r<-res[order(rownames(res)), order(colnames(res))]
+r
+image(r,axes=FALSE)
+```
+
 
 
 ```{r create_drift}
