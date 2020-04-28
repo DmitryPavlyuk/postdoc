@@ -116,51 +116,54 @@ res2.gr%>%ggplot(aes(x = time, y=minsimilarity))+geom_line()
 
 oneStepSimilarity <- function(folder, date.from,date.to, threshold, method){
   dates <- seq(from=date.from, to=date.to, by="5 min")
-  res <- NULL
+  res <- list()
   fs.prev<-NULL
+  fmt <- "%Y-%m-%d_%H%M%S"
   for(row in 1:length(dates)){
     name<-format(dates[row],fmt)
-    filename <- paste0(name,".rds")
+    #filename <- paste0(name,".rds")
+    filename <- file.path(paste0(wday(dates[row]),"_",daySec(dates[row]),".rds"))
     if (file.exists(file.path(folder, filename))){
       fs <- readRDS(file.path(folder, filename))
       if (!is.null(fs.prev)){
-        res <- bind_rows(res,
-                         list(datetime=dates[row], 
+        res[[length(res)+1]] <- list(datetime=dates[row], 
                          similarity=fsMTS::fsSimilarity(fs.prev, fs,cutoff=T, 
                                                         threshold = threshold, method=method),
                          threshold = threshold,
                          method=method,
-                         key=folder))
+                         key=folder)
       }
       fs.prev <- fs
     }else{
       fs.prev <- NULL
     }
   }
-  return(res)
+  return(bind_rows(res))
 }
 
-folder<-file.path("C:/tmp/fs/64","MIloc","36/3/0.3")
-fmt <- "%Y-%m-%d_%H%M%S"
+folder<-RFg.folder
 date.from <- as.POSIXct("2017-07-31_000000",format=fmt)
-date.to <- as.POSIXct("2017-10-07_000000",format=fmt)
+date.to <- as.POSIXct("2017-08-07_000000",format=fmt)
+r<-oneStepSimilarity(folder, date.from,date.to, threshold=0.1, method="Kuncheva")
+r$fs<-"RF"
+r$strategy<-"daytime"
+saveRDS(r, file.path(dir,"onestep","RF_daytime.rds"))
+#r<-r%>%separate(file,c("wd","sec"))%>%mutate(datetime=as.POSIXct("2017-07-29",format="%Y-%m-%d")+(as.numeric(wd
 
-sim.tibble<-NULL
-for (th in seq(0,1,by=0.1)){
-  for (method in c("Kuncheva")){
-    print(paste("Estimating: threshold=",th,", method=", method))
-    r<-oneStepSimilarity(folder, date.from,date.to, threshold=th, method=method)
-    sim.tibble<- bind_rows(sim.tibble, r)
-  }
+res<-list()
+for (f in list.files(file.path(dir,"onestep"))){
+  res[[length(res)+1]]<-readRDS(file.path(dir,"onestep",f))
 }
+all<-bind_rows(res)
+saveRDS(res, file.path(dir,"onestep","all.rds"))
 
-res<-sim.tibble%>%mutate(dow_time=format(datetime,"%w %H:%M"))
-saveRDS(res, file.path(dir,"GLASSOloc_oneStepSimilarity.rds"))
+res<-all%>%mutate(wd=wday(datetime))%>%filter(wd==3)%>%mutate(dow_time=format(datetime,"%H:%M"))
 
-res%>%filter(method=="Kuncheva", threshold>0)%>%mutate(key=paste(key, threshold))%>%group_by(key,dow_time)%>%summarise(mean.similarity=mean(similarity))%>%ggplot(aes(x = dow_time, y=mean.similarity, group=key, col=key))+geom_line()
+res%>%filter(method=="Kuncheva",fs=="RF", threshold>0)%>%mutate(key=paste(fs, strategy))%>%group_by(strategy,dow_time)%>%summarise(mean.similarity=mean(similarity),dt=first(datetime))%>%ggplot(aes(x = dt, y=mean.similarity, group=strategy, col=strategy))+geom_line(size=1)+scale_x_datetime(labels = date_format("%H:%M", tz="Europe/Helsinki"),date_breaks = "4 hours",expand = c(0,0))+ xlab("Time of the day") + ylab("One-step similarity")+ guides(col=guide_legend(title="Feature selection strategy"))+ theme(legend.position="bottom")+scale_color_brewer(palette="Dark2")
 
-stat<-res%>%filter(threshold>0)%>%group_by(method,key,threshold)%>%summarise(mean.similarity=mean(similarity))
-stat%>%ungroup%>%mutate(key=paste(key, method))%>%group_by(key)%>%ggplot(aes(x = threshold, y=mean.similarity, group=key, col=key))+geom_line()
+res%>%filter(method=="Kuncheva",strategy=="dynamic", threshold>0)%>%mutate(key=paste(fs, strategy))%>%group_by(fs,dow_time)%>%summarise(mean.similarity=mean(similarity),dt=first(datetime))%>%ggplot(aes(x = dt, y=mean.similarity, group=fs, col=fs))+geom_line(size=1)+scale_x_datetime(labels = date_format("%H:%M", tz="Europe/Helsinki"),date_breaks = "4 hours",expand = c(0,0))+ xlab("Time of the day") + ylab("One-step similarity")+ guides(col=guide_legend(title="Feature selection algorithm"))+ theme(legend.position="bottom")+scale_color_brewer(palette="Dark2")
+
+res%>%group_by(fs,strategy)%>%summarise(mean.onestep=mean(similarity))%>%spread(strategy,"mean.onestep")
 ```
 ```{r}
 
@@ -177,18 +180,48 @@ write.csv(mysample$config.nodes%>%filter(node_name %in% related)%>%inner_join(re
 ```
 
 ```{r}
-dates <- seq(from=date.from, to=date.to, by="5 min")
-
-mlist<-list()
-for(row in 1:length(dates)){
-  name<-format(dates[row],fmt)
-  filename <- paste0(name,".rds")
-  if (file.exists(file.path(folder, filename))){
-    fs <- readRDS(file.path(folder, filename))
-    mlist[[name]]<-fs
-  }
+loadDay<-function(datetime, folder){
+  fmt <- "%Y-%m-%d_%H%M%S"
+  dates <- seq(from=datetime, to=datetime+(24*60-1)*60, by="5 min")
+  mlist<-list()
+  for(row in 1:length(dates)){
+    name<-format(dates[row],fmt)
+    filename <- paste0(name,".rds")
+    if (file.exists(file.path(folder, filename))){
+      fs <- readRDS(file.path(folder, filename))
+      mlist[[name]]<-fs
+    }
+  }  
+  return(mlist)
 }
-msim<-fsSimilarityMatrix(mlist,threshold=0.2,method="Kuncheva")
+
+
+fmt <- "%Y-%m-%d_%H%M%S"
+date.from <- as.POSIXct("2017-07-31_000000",format=fmt)
+date.to <- as.POSIXct("2017-10-07_000000",format=fmt)
+days <- seq(from=date.from, to=date.to, by="1 days")
+cl <- makeCluster(7, outfile="outfile.txt")
+registerDoParallel(cl)
+foreach (d = 1:length(days),.export=c("loadDay"),
+                  .packages=c("fsMTS","dplyr")) %dopar% {
+  res<-list()
+  day<-days[d]
+  for (fold in c(CCF.folder,MI.folder,GLASSO.folder,LARS.folder,RF.folder,
+     CCF.folder.drift,MI.folder.drift,GLASSO.folder.drift,LARS.folder.drift,RF.folder.drift)){
+    print(paste(day,fold))
+    ml<-loadDay(day,fold)
+    msim<-fsSimilarityMatrix(ml,threshold=0.1,method="Kuncheva")
+    print(paste("Stability", mean(msim)))
+    res[[length(res)+1]]<-list(folder=fold,date=day,stability=mean(msim))
+  }
+  result<-bind_rows(res)
+  fmt <- "%Y-%m-%d_%H%M%S"
+  filename<-paste0(format(day,fmt),".rds")
+  print(filename)
+  saveRDS(result, file.path("stability", filename))
+}
+
+te<-readRDS(file.path("stability","2017-07-31_000000.rds"))
 image(msim)
 mean(msim)
 max(msim)
@@ -264,24 +297,37 @@ MI.folder <- file.path(dir,"fs",length(series),"MI",36,maxlag)
 GLASSO.folder <- file.path(dir,"fs",length(series),"GLASSOloc",36,maxlag,0.3)
 LARS.folder <- file.path(dir,"fs",length(series),"LARS",36,maxlag)
 RF.folder <- file.path(dir,"fs",length(series),"RF",36,maxlag)
+EnsVoting.folder <- file.path(dir,"fs",length(series),"EnsVoting",36,maxlag,0.1)
+EnsRanking.folder <- file.path(dir,"fs",length(series),"EnsRanking",36,maxlag,0.1)
 
-CCF.folder.drift <- file.path(dir,"fs",length(series),"CCFdrift",36,maxlag)
+EnsVoting.folder.drift <- file.path(dir,"fs",length(series),"EnsVotingdrift",36,maxlag,0.1)
+EnsRanking.folder.drift <- file.path(dir,"fs",length(series),"EnsRankingdrift",36,maxlag,0.1)
 SMOOTH_SIZE <- 6
 prev <- list()
-fold<-CCF.folder
-fold.drift <- CCF.folder.drift
-if (!file.exists(fold.drift)) dir.create(fold.drift)
+fold<-EnsRanking.folder
+fold.drift <- EnsRanking.folder.drift
+if (!file.exists(fold.drift)) dir.create(fold.drift, recursive = T)
+p<-NULL
+pOrig<-NULL
 for (f in list.files(fold)){
   fs <- readRDS(file.path(fold,f))
   prev[[length(prev)+1]]<-fs
   if (length(prev)>SMOOTH_SIZE) prev[[1]] <- NULL
-  fs.drift <- fsMTS::fsEnsemble(prev, threshold = 1, method="ranking")
+  if  (length(prev)==1){
+    fs.drift <- fs
+  }else{
+    fs.drift <-apply(simplify2array(prev), 1:2, mean)
+  }
+  if (length(prev)>1) print(paste(f," ",fsSimilarity(p,fs.drift,cutoff=T, threshold = 0.1)," ",fsSimilarity(pOrig,fs,cutoff=T, threshold = 0.1)))
+  p<-fs.drift
+  pOrig<-fs
   saveRDS(fs.drift,file.path(fold.drift,f))
 }
 
 ```
 
 ```{r create_ensemble}
+maxlag<-3
 fs.distance.global <- readRDS(file.path(dir,"fs",length(series),"distance",20160,maxlag,"2017-10-08_000000.rds"))
 fs.CCF.global <- readRDS(file.path(dir,"fs",length(series),"CCF",20160,maxlag,"2017-10-08_000000.rds"))
 fs.GLASSO.global <- readRDS(file.path(dir,"fs",length(series),"GLASSOloc",20160,maxlag,0.3,"2017-10-08_000000.rds"))
@@ -345,6 +391,40 @@ for (f in list.files(CCFg.folder)){
   rownames(EnsembleRank)<-rownames(EnsembleMajV)
   saveRDS(EnsembleMajV,file.path(EnsVotingg.folder,f))
   saveRDS(EnsembleRank,file.path(EnsRankingg.folder,f))
+  print(paste(f,"Sparsity",fsMTS::fsSparsity(EnsembleMajV)))
+}
+
+
+
+CCF.folder <- file.path(dir,"fs",length(series),"CCF",36,maxlag)
+MI.folder <- file.path(dir,"fs",length(series),"MI",36,maxlag)
+GLASSO.folder <- file.path(dir,"fs",length(series),"GLASSOloc",36,maxlag,0.3)
+LARS.folder <- file.path(dir,"fs",length(series),"LARS",36,maxlag)
+RF.folder <- file.path(dir,"fs",length(series),"RF",36,maxlag)
+
+EnsVoting.folder <- file.path(dir,"fs",length(series),"EnsVoting",36,maxlag,th)
+dir.create(EnsVoting.folder, recursive = T)
+EnsRanking.folder <- file.path(dir,"fs",length(series),"EnsRanking",36,maxlag,th)
+dir.create(EnsRanking.folder, recursive = T)
+
+for (f in list.files(CCF.folder)){
+  fs.CCF.dynamic <- readRDS(file.path(CCF.folder,f))
+  fs.GLASSO.dynamic <- readRDS(file.path(GLASSO.folder,f))
+  fs.MI.dynamic <- readRDS(file.path(MI.folder,f))
+  fs.LARS.dynamic <- readRDS(file.path(LARS.folder,f))
+  fs.RF.dynamic <- readRDS(file.path(RF.folder,f))
+  mlist <- list(Distance = fs.distance.global,
+              CCF = fs.CCF.dynamic,
+              GLASSO = fs.GLASSO.dynamic,
+              MI = fs.MI.dynamic,
+              LARS = fs.LARS.dynamic,
+              RF = fs.RF.dynamic)
+  EnsembleRank <- fsMTS::fsEnsemble(mlist, threshold = th, method="ranking")
+  EnsembleMajV <- fsMTS::fsEnsemble(mlist, threshold = th, method="majority")
+  colnames(EnsembleRank)<-colnames(EnsembleMajV)
+  rownames(EnsembleRank)<-rownames(EnsembleMajV)
+  saveRDS(EnsembleMajV,file.path(EnsVoting.folder,f))
+  saveRDS(EnsembleRank,file.path(EnsRanking.folder,f))
   print(paste(f,"Sparsity",fsMTS::fsSparsity(EnsembleMajV)))
 }
 
