@@ -275,7 +275,11 @@ day<-as.POSIXct("2017-08-02_000000",fmt)
 mlist<-loadDay(day,CCFg.folder)
 res<-fsSimilarityMatrix(mlist, threshold = 0.1,method="Kuncheva")
 r<-res[order(rownames(res)), order(colnames(res))]
-r
+image(r,axes=FALSE)
+
+mlist<-loadDay(day,CCF.folder)
+res<-fsSimilarityMatrix(mlist, threshold = 0.1,method="Kuncheva")
+r<-res[order(rownames(res)), order(colnames(res))]
 image(r,axes=FALSE)
 ```
 
