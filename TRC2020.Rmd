@@ -114,6 +114,7 @@ if (!file.exists(sample.rds)){
 }else{
   sampl <- readRDS(sample.rds)
 }
+series<-colnames(sampl$data)[-1]
 ```
 
 Define folders for feature sets
@@ -414,24 +415,26 @@ plot(mlist[["EnsRanking"]], col=rev(heat.colors(10)), key=NULL, main="EnsRanking
 plot(mlist[["EnsVoting"]], col=rev(heat.colors(10)), key=NULL, main="EnsVoting",ylab="",xlab="", axis.col = NULL, axis.row = NULL,border="lightgrey")
 msimilarity<-fsSimilarityMatrix(mlist, threshold = 0.1, method="Kuncheva")
 
-plot(msimilarity, digits=2, col=rev(heat.colors(ncol(msimilarity))), key=NULL,
-     main="System-wise", cex.axis=0.7,ylab="",xlab="")
+needs(heatmaply)
+plot(msimilarity, digits=2, col=rev(Spectral(21)),breaks=seq(-1,1,by=0.1), key=NULL, main="Sample-wise", cex.axis=0.7,ylab="",xlab="")
 matrixes<-list()
-for (f in list.files(CCFg.folder)){
+for (f in list.files(CCF.folder.drift)){
   mlist<-list(
-    CCF=readRDS(file.path(CCFg.folder,f)),
-    GLASSO=readRDS(file.path(GLASSOg.folder,f)),
-    MI=readRDS(file.path(MIg.folder,f)),
-    LARS=readRDS(file.path(LARSg.folder,f)),
-    RF=readRDS(file.path(RFg.folder,f)),
+    CCF=readRDS(file.path(CCF.folder.drift,f)),
+    GLASSO=readRDS(file.path(GLASSO.folder.drift,f)),
+    MI=readRDS(file.path(MI.folder.drift,f)),
+    LARS=readRDS(file.path(LARS.folder.drift,f)),
+    RF=readRDS(file.path(RF.folder.drift,f)),
     Distance=readRDS(distance.folder),
-    EnsVoting=readRDS(file.path(EnsVotingg.folder,f)),
-    EnsRanking=readRDS(file.path(EnsRankingg.folder,f))
+    EnsVoting=readRDS(file.path(EnsVoting.folder.drift,f)),
+    EnsRanking=readRDS(file.path(EnsRanking.folder.drift,f))
   )
   print(f)
   matrixes[[length(matrixes)+1]]<-fsSimilarityMatrix(mlist, threshold = 0.1, method="Kuncheva")
 }
 res<-apply(simplify2array(matrixes), 1:2, mean)
+plot(res, digits=2, col=rev(Spectral(21)),breaks=seq(-1,1,by=0.1), key=NULL, main="Dynamic with drift", cex.axis=0.7,ylab="",xlab="")
+
 
 fmt <- "%Y-%m-%d_%H%M%S"
 day<-as.POSIXct("2017-08-02_000000",fmt)
