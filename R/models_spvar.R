@@ -27,10 +27,10 @@ starForecast <-function(sampl, forecastingSteps, arLags,threshold, fs.folder=NA,
       fixed <-fixed+fsMTS::fsMTS(as.matrix(sampl),arLags,method="ownlags")
       fixed[fixed>0]<-1
     }else{
-      m<-matrix(0,arLags*ncol(sampl), ncol(sampl))
-      diag(m)<-1
-      fixed <-fixed+m
-      fixed[fixed>0]<-1
+      # m<-matrix(0,arLags*ncol(sampl), ncol(sampl))
+      # diag(m)<-1
+      # fixed <-fixed+m
+      # fixed[fixed>0]<-1
     }
     print(paste(filename,"Number of links",sum(fixed>0)))
   }else{
@@ -95,10 +95,10 @@ knnForecast <-function(mts, forecastingSteps, arLags,threshold, fs.folder=NA,con
       fixed <-fixed+fsMTS::fsMTS(as.matrix(mts),arLags,method="ownlags")
       fixed[fixed>0]<-1
     }else{
-        m<-matrix(0,arLags*ncol(mts), ncol(mts))
-        diag(m)<-1
-        fixed <-fixed+m
-        fixed[fixed>0]<-1
+        # m<-matrix(0,arLags*ncol(mts), ncol(mts))
+        # diag(m)<-1
+        # fixed <-fixed+m
+        # fixed[fixed>0]<-1
     }
     print(paste(filename,"Number of links",sum(fixed>0)))
   }else{
