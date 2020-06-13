@@ -1,0 +1,13 @@
+starting worker pid=11500 on localhost:11714 at 09:23:07.833
+starting worker pid=14476 on localhost:11714 at 09:23:08.043
+[1] "Saving EWGT2020/fs/129/ownlags/20160/3/2017-10-08_000000.rds"
+Error in unserialize(node$con) : error reading from connection
+Calls: <Anonymous> ... doTryCatch -> recvData -> recvData.SOCKnode -> unserialize
+In addition: Warning message:
+package 'fsMTS' was built under R version 3.6.3 
+Execution halted
+Error in unserialize(node$con) : error reading from connection
+Calls: <Anonymous> ... doTryCatch -> recvData -> recvData.SOCKnode -> unserialize
+In addition: Warning message:
+package 'fsMTS' was built under R version 3.6.3 
+Execution halted
