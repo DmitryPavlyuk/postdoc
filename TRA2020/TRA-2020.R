@@ -20,17 +20,18 @@ needs(ClusterR)
 needs(tidyverse)
 options(viewer = NULL)
 
-source(file.path("TRA-2020-functions.R"))
+dir <- file.path(getwd(),"TRA2020")
+  
+source(file.path(dir,"TRA-2020-functions.R"))
 
 set_api_key()
 #4cf79c4e-6afc-4e4e-b8bf-1eb6b0d88d1f
-
-raw.folder<-paste0(getwd(),"/RK/Validations-Dump_2018/")
-raw.rds.folder<-paste0(getwd(),"/RK/prepared/")
-processed.folder<-paste0(getwd(),"/RK/processed/")
-gtfs.folder<-paste0(getwd(),"/RK/gtfs/")
-daily.folder<-paste0(getwd(),"/RK/daily/")
-folder<-paste0(getwd(),"/RK/")
+raw.folder<-paste0(dir,"/RK/Validations-Dump_2018/")
+raw.rds.folder<-paste0(dir,"/RK/prepared/")
+processed.folder<-paste0(dir,"/RK/processed/")
+gtfs.folder<-paste0(dir,"/RK/gtfs/")
+daily.folder<-paste0(dir,"/RK/daily/")
+folder<-paste0(dir,"/RK/")
 
 if (!dir.exists(daily.folder)){
   data.complete.file <- paste0(folder,"complete.rds")
@@ -170,6 +171,24 @@ dist<-matrix(0,nrow=length(res), ncol=length(res))
 rownames(dist)<-names(res)
 colnames(dist)<-names(res)
 fsize<-0
+
+p1<-res[['20180301']]$mobility.pattern
+p2<-res[['20180302']]$mobility.pattern
+needs(flexclust)
+mdist<-flexclust::dist2(normalise_pattern(p1,norm.vals),normalise_pattern(p2,norm.vals), method="euclidean", p=2)
+needs(RcppHungarian)
+soln<-RcppHungarian::HungarianSolver(mdist)
+soln
+
+p1 <- p1%>%filter(!is.na(datetime))%>%top_n(4, size)
+p2<- p2%>%filter(!is.na(datetime))%>%top_n(4, size)
+
+#smint::closest(X=as.matrix(normalise_pattern(p1,norm.vals)),XNew=as.matrix(normalise_pattern(p2,norm.vals)))
+
+source(file.path(dir,"TRA-2020-functions.R"))
+pattern_distance(p1,p2,norm.vals,fsize)
+
+
 for (d1 in names(res)){
   print(d1)
   for (d2 in names(res)){
@@ -224,11 +243,11 @@ dd%>%group_by(cluster,wd)%>%summarise(n=n())%>%spread("cluster", "n")
 
 #dd%<>%mutate(cluster=ifelse(wd=="Saturday",1,ifelse(wd=="Sunday",2,ifelse(wd=="Friday",3,4))))
 
-dd%>%filter(cluster==3, wd!="Saturday", wd!="Sunday")
+dd%>%filter(cluster==1, wd!="Saturday", wd!="Sunday")
 dd%>%filter(cluster==1, wd=="Saturday")
 dd%>%filter(cluster==3)
 
-interval<-74
+interval<-56
 ma<-data.frame()
 for (i in seq(from=1,to=nrow(dd)-interval, by=7)){
   mo<-dd[i:(i+interval),]
@@ -240,19 +259,19 @@ for (i in seq(from=1,to=nrow(dd)-interval, by=7)){
   }
   ma<-bind_rows(ma,l)
 }
-str<-c(cluster1="Weekdays, pattern 1",cluster2="Weekdays, pattern 2",cluster3="Weekends")
+str<-c(cluster1="Weekends / holidays",cluster2="Weekdays, pattern 1",cluster3="Weekdays, pattern 2")
 as_tibble(ma)%>%gather(key="cluster", value="distance", -date)%>%mutate(cluster=str[cluster])%>%
   ggplot(aes(y=distance,x=date, group=cluster, color=cluster))+geom_line(size=2)+ylab("Within-cluster distance")
 
 dd%>%mutate(m=month(date))%>%group_by(cluster,m)%>%summarise(n())%>%print(n=50)
 
 dd%>%mutate(m=month(date))%>%group_by(cluster,m,wd)%>%summarise(n=n())%>%spread("m","n")%>%
-  filter(cluster!=3)%>%arrange(wd)
+  filter(cluster!=1)%>%arrange(wd)
 
 dd%>%mutate(m=as.factor(month(date)))%>%group_by(cluster,m)%>%summarise(n=n())%>%spread("m","n")%>%
-  filter(cluster!=3)%>%arrange(cluster)
+  filter(cluster!=1)%>%arrange(cluster)
 dd%>%mutate(sea=(month(date)%%12)%/%3)%>%group_by(cluster,sea)%>%summarise(n=n())%>%spread("sea","n")%>%
-  filter(cluster!=3)%>%arrange(cluster)
+  arrange(cluster)
 
 dd%>%filter(cluster!=3)%>%ggplot(aes(x=date, y=cluster,group=1))+geom_line()
 

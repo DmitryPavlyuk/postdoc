@@ -263,15 +263,16 @@ construct_daily_mobility <- function(mobility, day,start_hours, vector_count, li
 }
 
 normalise_pattern <- function(mobility.pattern,norm.vals){
+  #mutate(X1=ifelse(is.na(dayminutes),rnorm(nrow(mobility.pattern),19*60,4*60),as.numeric(dayminutes)))%>%
   mobility.pattern%>%
     mutate(dayminutes=hour(datetime)*60+minute(datetime))%>%
-    mutate(X1=ifelse(is.na(dayminutes),rnorm(nrow(mobility.pattern),19*60,4*60),as.numeric(dayminutes)))%>%
+    mutate(X1=dayminutes)%>%
     mutate(X2=as.numeric(stop_lat.x))%>%
     mutate(X3=as.numeric(stop_lon.x))%>%
     mutate(X4=as.numeric(stop_lat.y))%>%
     mutate(X5=as.numeric(stop_lon.y))%>%
     mutate(X6=as.numeric(size))%>%
-    mutate(X1norm=(X1-norm.vals$dayminutes.mean)/norm.vals$dayminutes.sd)%>%
+    mutate(X1norm=ifelse(is.na(X1),0,as.numeric((X1-norm.vals$dayminutes.mean)/norm.vals$dayminutes.sd)))%>%
     mutate(X2norm=(X2-norm.vals$stop_lat.x.mean)/norm.vals$stop_lat.x.sd)%>%
     mutate(X3norm=(X3-norm.vals$stop_lon.x.mean)/norm.vals$stop_lon.x.sd)%>%
     mutate(X4norm=(X4-norm.vals$stop_lat.y.mean)/norm.vals$stop_lat.y.sd)%>%
@@ -285,7 +286,11 @@ pattern_distance <- function(mobility.pattern1, mobility.pattern2,norm.vals,filt
   if (filter_size>0) p1%<>%filter(size>filter_size)
   p2<-mobility.pattern2
   if (filter_size>0) p2%<>%filter(size>filter_size)
-  r1<-smint::closest(X=as.matrix(normalise_pattern(p1,norm.vals)),XNew=as.matrix(normalise_pattern(p2,norm.vals)))
-  r2<-smint::closest(X=as.matrix(normalise_pattern(p1,norm.vals)),XNew=as.matrix(normalise_pattern(p2,norm.vals)))
-  return(min(sum(r1$dist),sum(r1$dist)))
+  #r1<-smint::closest(X=as.matrix(normalise_pattern(p1,norm.vals)),XNew=as.matrix(normalise_pattern(p2,norm.vals)))
+  mdist<-flexclust::dist2(normalise_pattern(p1,norm.vals),normalise_pattern(p2,norm.vals), method="euclidean", p=2)
+  soln<-RcppHungarian::HungarianSolver(mdist)
+  #r2<-smint::closest(X=as.matrix(normalise_pattern(p1,norm.vals)),XNew=as.matrix(normalise_pattern(p2,norm.vals)))
+  #return(min(sum(r1$dist),sum(r1$dist)))
+  #return (sum(r1$dist))
+  return(soln$cost)
 }
