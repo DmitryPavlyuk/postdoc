@@ -31,6 +31,6 @@ See [data transformation markdown](./data_transformation.Rmd) for transformation
     + 6th International conference on Time Series and Forecasting - ITISE 2019 [markdown](./ITISE2019.Rmd) http://itise.ugr.es/
     + 19th International Multi-Conference Reliability and Statistics in Transportation and Communication - RelStat-2019 [markdown](./RelStat2019.Rmd) http://relstat2019.tsi.lv/
 	+ Transport Research Area 2020 [markdown](./TRA2020/TRA-2020.R) with further improvements for publication in Transport journal
-    + "Robust Learning of Spatiotemporal Urban Traffic Flow Relationships" prepared for submission to Transportation Research: Part C [markdown](./TRC2020.Rmd)
+    + "Robust Learning of Spatiotemporal Urban Traffic Flow Relationships" prepared for submission [markdown](./RobustFS.Rmd)
 	+ 23nd Euro Working Group on Transportation Meeting - EWGT 2020 [markdown](./EWGT2020.Rmd) http://www.ewgt2020.eu/
     
