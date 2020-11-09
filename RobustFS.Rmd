@@ -1,13 +1,13 @@
 ---
 title: "Ensemble feature selection"
 author: "Dmitry Pavlyuk"
-date: "March 24, 2020"
+date: "Nov 09, 2020"
 output: html_document
 editor_options: 
   chunk_output_type: console
 ---
 
-This markdown document reproduces the research "Robust Learning of Spatiotemporal Urban Traffic Flow Relationships" (to be submitted to TRC)
+This markdown document reproduces the research "Robust Learning of Spatiotemporal Urban Traffic Flow Relationships" (to be submitted)
 
 
 ```{r child='sampling.Rmd'}
@@ -49,7 +49,7 @@ source(file.path("R","models_baseline.R"))
 source(file.path("R","models_spvar.R"))
 
 # Define files for intermediate results
-dir<-"TRC2020"
+dir<-"RobustFS2020"
 models.estimated.file <- file.path(dir,"models.rds")
 results.file <- file.path(dir,"results.rds")
 complete.rds <- file.path("data","prepared","ALL5-original.rds")
