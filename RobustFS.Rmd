@@ -397,8 +397,6 @@ all%>%group_by(folder)%>%summarise(mean.stability = mean(stability))
 plot(mlist[["EnsRanking"]], col=rev(heat.colors(10)), key=NULL, main="EnsRanking",ylab="",xlab="", axis.col = NULL, axis.row = NULL,border="lightgrey")
 ```
 
-
-
 Estimate similarity of feature sets
 ```{r similarity_matrix}
 mlist<-list(
@@ -651,4 +649,167 @@ gtmp%>%ggplot(aes(x = last_date, y=Difference, group=key, col=key))+
   scale_x_datetime(labels = date_format("%H:%M", tz="Europe/Helsinki"),date_breaks = "4 hours",expand = c(0,0))+
   xlab("Time of the day") + ylab("Difference in RMSE")+ guides(col=guide_legend(title="Pair-wise comparison"))+
   theme(legend.position="bottom")+scale_color_brewer(palette="Dark2")
+```
+
+
+Prepare data for GCN
+```{r prepare_data_GCN}
+write.table(sampl$data%>%select(-datetime),file=file.path(dir,"my_data.csv"),sep=",",row.names=FALSE, col.names = TRUE)
+
+
+A=readRDS(EnsRanking.global)
+A = cutoff(A,0.1)
+fsSparsity(A)
+write.table(A[1:n,1:n],file=file.path(dir,"fs_csv","EnsRanking","global","l1.csv"),sep=",",row.names=FALSE, col.names = FALSE)
+write.table(A[(n+1):(2*n),1:n],file=file.path(dir,"fs_csv","EnsRanking","global","l2.csv"),sep=",",row.names=FALSE, col.names = FALSE)
+write.table(A[(2*n+1):(3*n),1:n],file=file.path(dir,"fs_csv","EnsRanking","global","l3.csv"),sep=",",row.names=FALSE, col.names = FALSE)
+
+
+
+
+infolder = CCF.folder
+outfolder = file.path(dir,"fs_csv","CCF","dynamic")
+files<-list.files(path=infolder, pattern='*.rds')
+for (fname in files){
+  datestr = tools::file_path_sans_ext(fname)
+  start = as.POSIXct("2017-07-30_000000",format="%Y-%m-%d_%H%M%OS")
+  cur = as.POSIXct(datestr,format="%Y-%m-%d_%H%M%OS")
+  num = as.numeric(difftime(cur,start,units="mins")) / 5
+  if(num<4300 & num>2240){
+    print(paste(infolder,fname," = ", num))
+    A=readRDS(file.path(infolder,fname))
+    outf = file.path(outfolder,num)
+    dir.create(outf, showWarnings = FALSE,recursive = TRUE)
+    A = cutoff(A,0.1)
+    print(fsSparsity(A))
+    write.table(A[1:n,1:n],file=file.path(outf,"l1.csv"),sep=",",row.names=FALSE, col.names = FALSE)
+    write.table(A[(n+1):(2*n),1:n],file=file.path(outf,"l2.csv"),sep=",",row.names=FALSE, col.names = FALSE)
+    write.table(A[(2*n+1):(3*n),1:n],file=file.path(outf,"l3.csv"),sep=",",row.names=FALSE, col.names = FALSE)
+  }
+}
+
+
+dtfolder = EnsVoting.folder
+infolder = EnsVotingg.folder
+outfolder = file.path(dir,"fs_csv","EnsVoting","daytime")
+files<-list.files(path=dtfolder, pattern='*.rds')
+for (fname in files){
+  datestr = tools::file_path_sans_ext(fname)
+  start = as.POSIXct("2017-07-30_000000",format="%Y-%m-%d_%H%M%OS")
+  cur = as.POSIXct(datestr,format="%Y-%m-%d_%H%M%OS")
+  num = as.numeric(difftime(cur,start,units="mins")) / 5
+  if(num<4300 & num>2240){
+    ds <- daySec(cur)
+    filename <- paste0(wday(cur),"_",ds,".rds")
+    A=readRDS(file.path(infolder,filename))
+    print(paste(fname,":",filename," = ", num))
+    outf = file.path(outfolder,num)
+    dir.create(outf, showWarnings = FALSE,recursive = TRUE)
+    A = cutoff(A,0.1)
+    write.table(A[1:n,1:n],file=file.path(outf,"l1.csv"),sep=",",row.names=FALSE, col.names = FALSE)
+    write.table(A[(n+1):(2*n),1:n],file=file.path(outf,"l2.csv"),sep=",",row.names=FALSE, col.names = FALSE)
+    write.table(A[(2*n+1):(3*n),1:n],file=file.path(outf,"l3.csv"),sep=",",row.names=FALSE, col.names = FALSE)
+  }
+}
+```
+
+
+Anylise effects of noisy data
+```{r noisy_data}
+data <- sampl$data%>%select(-datetime)%>%as.matrix
+data <- data[1:(12*24*7),]
+
+genNA <- function(data, p){
+  dataR <- data
+  nr <- nrow(dataR); nc <- ncol(dataR)
+  ina <- is.na(unlist(dataR))
+  n2 <- floor(p*nr*nc) - sum(ina)
+  ina[sample(which(!is.na(ina)), n2)] <- TRUE
+  dataR[matrix(ina, nr=nr,nc=nc)]<- dataR[matrix(ina, nr=nr,nc=nc)]*(rexp(n2)^4)
+  return(dataR)
+}
+
+genNA <- function(data, p){
+  g <- data
+  for(i in 1:ncol(data)){
+   sdi <-sd(data[,i])
+   meani <-mean(data[,i])
+   vali <- round(rnorm(nrow(data),0,25*sdi))
+   g[,i] <- data[,i] + vali #Purely random
+  }
+  dataR <- data
+  nr <- nrow(dataR); nc <- ncol(dataR)
+  ina <- is.na(unlist(dataR))
+  n2 <- floor(p*nr*nc) - sum(ina)
+  ina[sample(which(!is.na(ina)), n2)] <- TRUE
+  dataR[ina]<- g[ina]
+  return(dataR)
+}
+
+resList=list()
+resList <- list("CCF0"=resList[[paste0("CCF0")]],
+                "GLASSO0"=resList[[paste0("GLASSO0")]],
+                "LARS0"=resList[[paste0("LARS0")]],
+                "RF0"=resList[[paste0("RF0")]],
+                "MI0"=resList[[paste0("MI0")]],
+                "EnsembleRank0"=resList[[paste0("EnsembleRank0")]],
+                "EnsembleMajV0"=resList[[paste0("EnsembleMajV0")]]
+                )
+for (sp in c(0.15)){
+  print(num)
+  d <- genNA(data, sp)
+  mIndep<-fsMTS(d, max.lag=3, method="ownlags")
+  mCCF<-fsMTS(d, max.lag=3, method="CCF")
+  print("CCF")
+  mDistance<-fsMTS(d, max.lag=3, method="distance", shortest = sampl$shortest, step = 5)
+  print("Dist")
+  mGLASSO<-fsMTS(d, max.lag=3,method="GLASSO", rho = 0.05)
+  print("GLASSO")
+  mLARS<-fsMTS(d, max.lag=3,method="LARS")
+  print("LARS")
+  mRF<-fsMTS(d, max.lag=3,method="RF")
+  print("RF")
+  mMI<-fsMTS(d, max.lag=3,method="MI")
+  print("MI")
+  mlist <- list(Independent = mIndep,
+                Distance = mDistance,
+                CCF = mCCF,
+                GLASSO = mGLASSO,
+                LARS = mLARS,
+                RF = mRF,
+                MI = mMI)
+  print(sp)
+  th<-0.1
+  mlist[["EnsembleRank"]] <- fsEnsemble(mlist, threshold = th, method="ranking")
+  mlist[["EnsembleMajV"]] <- fsEnsemble(mlist, threshold = th, method="majority")
+  resList[[paste0("CCF",sp)]] <- mCCF
+  resList[[paste0("GLASSO",sp)]] <- mGLASSO
+  resList[[paste0("LARS",sp)]] <- mLARS
+  resList[[paste0("RF",sp)]] <- mRF
+  resList[[paste0("MI",sp)]] <- mMI
+  resList[[paste0("EnsembleRank",sp)]] <- mlist[["EnsembleRank"]]
+  resList[[paste0("EnsembleMajV",sp)]] <- mlist[["EnsembleMajV"]]
+  saveRDS(resList, file=file.path(dir,"resList_ADDweek.rds"))
+}
+
+
+resList <-readRDS(file.path(dir,"resList_ADDweek.rds"))
+
+th<-0.1
+df = data.frame(
+  "CCF"=fsSimilarityMatrix(resList[grepl("CCF", names(resList))],threshold = th, method="Kuncheva")[1,],
+  "GLASSO"=fsSimilarityMatrix(resList[grepl("GLASSO", names(resList))],threshold = th, method="Kuncheva")[1,],
+  "LARS" = fsSimilarityMatrix(resList[grepl("LARS", names(resList))],threshold = th, method="Kuncheva")[1,],
+  "RF" = fsSimilarityMatrix(resList[grepl("RF", names(resList))],threshold = th, method="Kuncheva")[1,],
+  "MI" = fsSimilarityMatrix(resList[grepl("MI", names(resList))],threshold = th, method="Kuncheva")[1,],
+  "EnsRanking" = fsSimilarityMatrix(resList[grepl("EnsembleRank", names(resList))],threshold = th, method="Kuncheva")[1,],
+  "EnsVoting" = fsSimilarityMatrix(resList[grepl("EnsembleMajV", names(resList))],threshold = th, method="Kuncheva")[1,])
+df$error = as.numeric(gsub("CCF","",rownames(df)))*100
+df
+
+as.tibble(df)%>%filter(error<=10)%>%gather(key = "fs", value="value", -error)%>%ggplot(aes(x = error, y = value, col=fs, group=fs)) + geom_line(size=1)+ xlab("Noise Rate, %") + ylab("STN similarity")+guides(col=guide_legend(title="Feature selection algorithm"))+theme(legend.position="bottom")+scale_color_brewer(palette="Dark2") +scale_x_continuous(expand = c(0,0))
+
+log(mean(apply(data, 2, var)/(apply(genNA(data,0.1), 2, var)-apply(data, 2, var))),10)*10
+
+
 ```

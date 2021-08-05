@@ -245,9 +245,9 @@ dd%>%group_by(cluster,wd)%>%summarise(n=n())%>%spread("cluster", "n")
 
 dd%>%filter(cluster==1, wd!="Saturday", wd!="Sunday")
 dd%>%filter(cluster==1, wd=="Saturday")
-dd%>%filter(cluster==3)
+dd%>%filter(cluster==2)%>%print(n=150)
 
-interval<-56
+interval<-28
 ma<-data.frame()
 for (i in seq(from=1,to=nrow(dd)-interval, by=7)){
   mo<-dd[i:(i+interval),]
@@ -262,6 +262,10 @@ for (i in seq(from=1,to=nrow(dd)-interval, by=7)){
 str<-c(cluster1="Weekends / holidays",cluster2="Weekdays, pattern 1",cluster3="Weekdays, pattern 2")
 as_tibble(ma)%>%gather(key="cluster", value="distance", -date)%>%mutate(cluster=str[cluster])%>%
   ggplot(aes(y=distance,x=date, group=cluster, color=cluster))+geom_line(size=2)+ylab("Within-cluster distance")
+
+needs(plot.matrix)
+dts<-dd%>%filter(cluster==1)%>%select(dt)%>%pull
+plot(dist[dts,dts])
 
 dd%>%mutate(m=month(date))%>%group_by(cluster,m)%>%summarise(n())%>%print(n=50)
 
